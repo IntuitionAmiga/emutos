@@ -106,7 +106,7 @@ UBYTE *balloc_stram(ULONG size, BOOL top)
      * Alignment on long boundaries is faster in FastRAM. */
     size = (size + 3) & ~3;
 
-    if (memtop - membot < size)
+    if ((ULONG)memtop - (ULONG)membot < size)
         panic("balloc_stram(%lu): not enough memory\n", size);
 
     if (top)
@@ -143,7 +143,8 @@ void getmpb(MPB * mpb)
     /* Fill out the first memory descriptor */
     themd.m_link = NULL;        /* no next memory descriptor */
     themd.m_start = membot;
-    themd.m_length = memtop - themd.m_start;
+    /* Cast to ULONG to avoid 16-bit ptrdiff_t truncation with -mshort */
+    themd.m_length = (ULONG)memtop - (ULONG)themd.m_start;
     themd.m_own = NULL;         /* no owner's process descriptor */
 
     mpb->mp_mfl = &themd;       /* free list set to initial MD */

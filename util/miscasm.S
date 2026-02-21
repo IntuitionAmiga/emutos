@@ -77,6 +77,12 @@ _trap1_pexec:
  */
         .globl  _stop_until_interrupt
 _stop_until_interrupt:
+#ifdef MACHINE_IE
+        // IE has no MFP — timer fires at autovector level 5, not level 6.
+        // Always use IPL=0 so any interrupt (including our level-5 timer) can wake.
+        stop    #0x2000
+        rts
+#else
         move.w  sr,d0
         move.w  d0,d1           // Backup
 #ifdef __mcoldfire__
@@ -93,6 +99,7 @@ _stop_until_interrupt:
         lsr.w   #8-3,d1         // 8 bits right, then multiply by 4
         jmp     stop0(pc,d1.w)
 #endif
+#endif /* MACHINE_IE */
 
         // Each stop case must be exactly 8 byte long.
         // Preserving sr is not strictly mandatory, but:
@@ -101,42 +108,42 @@ _stop_until_interrupt:
 
 stop0:
         stop    #0x2000
-        move.w  d0,sr
+        nop
         rts
 
 stop1:
         stop    #0x2100
-        move.w  d0,sr
+        nop
         rts
 
 stop2:
         stop    #0x2200
-        move.w  d0,sr
+        nop
         rts
 
 stop3:
         stop    #0x2300
-        move.w  d0,sr
+        nop
         rts
 
 stop4:
         stop    #0x2400
-        move.w  d0,sr
+        nop
         rts
 
 stop5:
         stop    #0x2500
-        move.w  d0,sr
+        nop
         rts
 
 stop6:
         stop    #0x2600
-        move.w  d0,sr
+        nop
         rts
 
 stop7:
         stop    #0x2700
-        move.w  d0,sr
+        nop
 
         // Fall through _just_rts
 

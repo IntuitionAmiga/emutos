@@ -23,6 +23,10 @@
 #include "vdi_inline.h"
 #include "biosext.h"
 
+#ifdef MACHINE_IE
+#include "../bios/ie_machine.h"
+#endif
+
 
 /*
  * the following structure mimics the format of the stack frame
@@ -835,6 +839,92 @@ static void direct_screen_blit16(WORD count, WORD *str)
 }
 #endif
 
+#ifdef MACHINE_IE
+/*
+ * output a character string directly to the 32-bit IE screen
+ */
+static void direct_screen_blit_ie(WORD count, WORD *str)
+{
+    ULONG fgcol, bgcol;
+    WORD height, mode, n;
+    WORD src_width, dst_width;
+    UBYTE mask;
+    UBYTE *src, *p;
+    ULONG *dst, *save_dst, *q;
+
+    height = DELY;
+    mode = WRT_MODE;
+    src_width = FWIDTH;
+    dst_width = v_lin_wr / (WORD)sizeof(ULONG);
+
+    fgcol = ie_vdi_palette[TEXTFG];
+    bgcol = ie_vdi_palette[0];
+
+    dst = get_start_addr_ie(DESTX, DESTY);
+
+    for ( ; count > 0; count--)
+    {
+        src = (UBYTE *)FBASE + *str++;
+        save_dst = dst;
+
+        switch(mode) {
+        default:    /* WM_REPLACE */
+            for (n = height, p = src; n > 0; n--)
+            {
+                for (mask = 0x80, q = dst; mask; mask >>= 1)
+                {
+                    *q++ = (*p & mask) ? fgcol : bgcol;
+                }
+                p += src_width;
+                dst += dst_width;
+            }
+            break;
+        case WM_TRANS:
+            for (n = height, p = src; n > 0; n--)
+            {
+                for (mask = 0x80, q = dst; mask; mask >>= 1)
+                {
+                    if (*p & mask)
+                        *q = fgcol;
+                    q++;
+                }
+                p += src_width;
+                dst += dst_width;
+            }
+            break;
+        case WM_XOR:
+            for (n = height, p = src; n > 0; n--)
+            {
+                for (mask = 0x80, q = dst; mask; mask >>= 1)
+                {
+                    if (*p & mask)
+                        *q = ~*q;
+                    q++;
+                }
+                p += src_width;
+                dst += dst_width;
+            }
+            break;
+        case WM_ERASE:
+            for (n = height, p = src; n > 0; n--)
+            {
+                for (mask = 0x80, q = dst; mask; mask >>= 1)
+                {
+                    if (!(*p & mask))
+                        *q = fgcol;
+                    q++;
+                }
+                p += src_width;
+                dst += dst_width;
+            }
+            break;
+        }
+
+        dst = save_dst + 8;
+    }
+}
+#endif
+
 
 /*
  * output a character string directly to the screen
@@ -857,6 +947,9 @@ void direct_screen_blit(WORD count, WORD *str)
     src_width = FWIDTH;
     dst_width = v_lin_wr;
 
+#ifdef MACHINE_IE
+    if (TRUECOLOR_MODE) { direct_screen_blit_ie(count, str); return; }
+#endif
 #if CONF_WITH_VDI_16BIT
     if (TRUECOLOR_MODE)
     {

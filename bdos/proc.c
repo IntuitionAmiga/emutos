@@ -371,7 +371,8 @@ static void init_pd_fields(PD *p, char *tail, long max, char *envptr)
 
     /* memory values */
     p->p_lowtpa = (UBYTE *)p;              /*  M01.01.06   */
-    p->p_hitpa  = (UBYTE *)p  +  max;      /*  M01.01.06   */
+    /* Cast to ULONG to avoid 16-bit ptrdiff_t truncation with -mshort */
+    p->p_hitpa  = (UBYTE *)((ULONG)p + max);
     p->p_xdta = (DTA *) p->p_cmdlin;       /* default p_xdta is p_cmdlin */
     p->p_env = envptr;
 
@@ -540,8 +541,17 @@ static void proc_go(PD *p)
     KDEBUG(("BDOS xexec: trying to load (and execute) a process on %p ...\n",p->p_tbase));
     p->p_parent = run;
 
-    /* create a stack at the end of the TPA */
-    sp = (struct gouser_stack *) (p->p_hitpa - sizeof(struct gouser_stack));
+    /* create a stack at the end of the TPA.
+     * Compute the address via ULONG arithmetic to force a full 32-bit
+     * subtraction.  With -mshort, sizeof() returns a 16-bit size_t;
+     * GCC may then use NOTW for the negation but emit a .L index
+     * register, producing a positive offset (0x0000FFC6) instead of
+     * -58 (0xFFFFFFC6).  This causes all field writes to land 64 KB
+     * past the intended address. */
+    {
+        ULONG sp_addr = (ULONG)p->p_hitpa - (ULONG)sizeof(struct gouser_stack);
+        sp = (struct gouser_stack *) sp_addr;
+    }
 
     sp->basepage = p;      /* the stack contains the basepage */
 

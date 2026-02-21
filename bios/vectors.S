@@ -463,6 +463,7 @@ vbl_queue_next:
 #endif
 vbl_no_queue:
 
+#ifndef MACHINE_IE
         // screen hardcopy
         tst.w   _dumpflg.w
         jne     vbl_no_dump
@@ -471,6 +472,7 @@ vbl_no_queue:
         moveq  #-1,d0
         move.w  d0,_dumpflg.w
 vbl_no_dump:
+#endif /* !MACHINE_IE */
 
 #ifdef __mcoldfire__
         movem.l (sp), d1-d7/a0-a6       // restore registers
@@ -489,7 +491,7 @@ vbl_end:
         addq.w  #1,_vblsem.w
 #endif
 
-#if CONF_WITH_ATARI_VIDEO
+#if CONF_WITH_ATARI_VIDEO || defined(MACHINE_IE)
         rte
 #else
         rts
@@ -518,8 +520,21 @@ _int_timerc:
         move.w  d0,(a0)
         jpl     timerc_end
 #else
-        rol.w   _timer_c_sieve          // check for 4th call
-        jpl     timerc_end
+        // Save d0 BEFORE the sieve computation.  The fast path (3 out of 4
+        // ticks) was returning via RTE with d0 clobbered, which corrupts
+        // the caller's d0 — a race that crashes the BIOS trap handler when
+        // the timer fires between "move.w (sp)+,d0  ; SR→d0" and the
+        // "btst #13,d0" supervisor-mode test.
+        move.l  d0,-(sp)
+        move.w  _timer_c_sieve,d0
+        add.w   d0,d0
+        jcc     timerc_store_sieve
+        addq.w  #1,d0
+timerc_store_sieve:
+        move.w  d0,_timer_c_sieve       // check for 4th call
+        jpl     timerc_fast_end
+        // Slow path (every 4th tick): restore d0 then save all registers
+        move.l  (sp)+,d0
 #endif
 
 #ifdef __mcoldfire__
@@ -549,6 +564,12 @@ _int_timerc:
         lea     52(sp),sp
 #else
         movem.l (sp)+,d0-d7/a0-a6
+#endif
+        jra     timerc_end
+
+#ifndef __mcoldfire__
+timerc_fast_end:
+        move.l  (sp)+,d0                // restore d0 (fast path)
 #endif
 
 timerc_end:

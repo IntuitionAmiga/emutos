@@ -240,7 +240,7 @@ void xmfremd(MD *md)
     }
 
     entry = (MDEXT *)md - i;        /* point to first entry */
-    mdb = (MDBLOCK *)((char *)entry - sizeof(MDBLOCK *));
+    mdb = (MDBLOCK *)((ULONG)entry - (ULONG)sizeof(MDBLOCK *));
 
     mdb->entry[i].index = -1;       /* mark as free */
     KDEBUG(("xmfremd(): MD at %p freed\n",md));

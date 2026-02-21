@@ -70,7 +70,12 @@ _memcpy:
 #ifndef __mcoldfire__
         move.l   8(sp),a0        // load source pointer
         move.l   4(sp),a1        // load destination pointer
+#if __SIZEOF_SIZE_T__ == 2
+        moveq    #0,d0
+        move.w   12(sp),d0       // get length (16-bit size_t)
+#else
         move.l   12(sp),d0       // get length
+#endif
         cmpi.l   #BREAKEVEN,d0   // is it worth doing the complicated version?
         jge      memmove         // yes, branch
         jra      sdecr
@@ -98,7 +103,12 @@ memmove:
 #endif
         btst     #0,d0           // pointers mutually aligned?
         jne      back1
+#if __SIZEOF_SIZE_T__ == 2
+        moveq    #0,d0
+        move.w   12(sp),d0       // size (16-bit size_t)
+#else
         move.l   12(sp),d0       // size
+#endif
         jeq      end             // if size == 0, nothing to do
         add.l    d0,a0
         add.l    d0,a1
@@ -231,7 +241,12 @@ end:
 
 // backwards, when pointers are not aligned.
 back1:
+#if __SIZEOF_SIZE_T__ == 2
+        moveq    #0,d0
+        move.w   12(sp),d0       // size (16-bit size_t)
+#else
         move.l   12(sp),d0       // size
+#endif
         jeq      end             // if size == 0, nothing to do
 // backwards, but 16 bytes by 16 bytes forward.
         add.l    d0,a0
@@ -291,7 +306,12 @@ memcopy:
 #endif
         btst     #0,d0                 // pointers mutually aligned?
         jne      copy1                 // +
+#if __SIZEOF_SIZE_T__ == 2
+        moveq    #0,d0
+        move.w   12(sp),d0             // + (16-bit size_t)
+#else
         move.l   12(sp),d0             // +
+#endif
         jeq      end                   // if cnt == 0 && pointers both odd ...
         btst     #0,d1                 // pointers aligned, but odd?
         jeq      check64               // no
@@ -425,7 +445,12 @@ end1:
         rts
 
 copy1:
+#if __SIZEOF_SIZE_T__ == 2
+        moveq    #0,d0
+        move.w   12(sp),d0            // count (16-bit size_t)
+#else
         move.l   12(sp),d0
+#endif
                                        // count can be big; test on it !
         move.l   #16,d1                // == moveq; 4
         cmp.l    d1,d0                 // 6

@@ -95,6 +95,11 @@ _detect_cpu:
         moveq   #20,d0          // assume 68020
         btst    #8,d1           // check if 68030 data cache was enabled
         jeq     exit            // a zero here means no data cache, i.e. 68020
+#ifdef MACHINE_IE
+        // IE currently emulates a 68020-class CPU only.
+        // Do not run the 68030 PMMU probe path.
+        jra     exit
+#endif
         move.l  #0x0001001e,d0  // data cache enabled means 68030 - assume 68ec030
         PMOVE_FROM_TC(temp)     // try to access the TC register
         moveq   #30,d0          // no fault -> this is a 68030

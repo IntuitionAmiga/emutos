@@ -37,6 +37,9 @@
 #include "amiga.h"
 #include "lisa.h"
 #include "nova.h"
+#ifdef MACHINE_IE
+#include "ie_machine.h"
+#endif
 
 void detect_monitor_change(void);
 static void setphys(const UBYTE *addr);
@@ -621,6 +624,17 @@ void screen_init_mode(void)
 #endif /* CONF_WITH_ATARI_VIDEO */
     MAYBE_UNUSED(get_default_palmode);
 
+#ifdef MACHINE_IE
+    /* IE needs a real level-4 VBL vector even without Atari video hardware. */
+    VEC_VBL = int_vbl;
+    vblsem = 0;
+
+    /* IE uses a fixed native video mode (640x480). Set ST_HIGH so getrez()
+     * returns a mode consistent with hi-res geometry for AES/desktop layout. */
+    sshiftmod = ST_HIGH;
+    ie_screen_init();
+#endif
+
 #ifdef MACHINE_AMIGA
     amiga_screen_init();
 #endif
@@ -638,7 +652,14 @@ void screen_init_address(void)
     LONG vram_size;
     UBYTE *screen_start;
 
-#if CONF_VRAM_ADDRESS
+#ifdef MACHINE_IE
+    /*
+     * IE uses a fixed native framebuffer aperture.
+     * Keep v_bas_ad on that base so all rendering targets the real display.
+     */
+    vram_size = (LONG)(IE_VRAM_STRIDE * IE_VRAM_HEIGHT);
+    screen_start = (UBYTE *)IE_VRAM_BASE;
+#elif CONF_VRAM_ADDRESS
     vram_size = 0L;         /* unspecified */
     screen_start = (UBYTE *)CONF_VRAM_ADDRESS;
 #else
@@ -683,6 +704,10 @@ int rez_changeable(void)
     if (rez_was_hacked)
         return FALSE;
 
+#ifdef MACHINE_IE
+    return FALSE;
+#endif
+
 #ifdef MACHINE_AMIGA
     return TRUE;
 #endif
@@ -702,6 +727,10 @@ int rez_changeable(void)
 /* get monitor type (same encoding as VgetMonitor()) */
 WORD get_monitor_type(void)
 {
+#ifdef MACHINE_IE
+    return MON_COLOR;
+#endif
+
 #if CONF_WITH_VIDEL
     if (has_videl)
         return vmontype();
@@ -745,6 +774,8 @@ static ULONG calc_vram_size(void)
 {
 #ifdef MACHINE_AMIGA
     return amiga_initial_vram_size();
+#elif defined(MACHINE_IE)
+    return IE_VRAM_STRIDE * IE_VRAM_HEIGHT;
 #elif defined(MACHINE_LISA)
     return 32*1024UL;
 #else
@@ -814,6 +845,10 @@ void screen_get_current_mode_info(UWORD *planes, UWORD *hz_rez, UWORD *vt_rez)
 
 #ifdef MACHINE_AMIGA
     amiga_get_current_mode_info(planes, hz_rez, vt_rez);
+#elif defined(MACHINE_IE)
+    *planes = 32;
+    *hz_rez = IE_VRAM_WIDTH;
+    *vt_rez = IE_VRAM_HEIGHT;
 #elif defined(MACHINE_LISA)
     *planes = 1;
     *hz_rez = 720;
@@ -832,6 +867,8 @@ WORD get_palette(void)
 {
 #ifdef MACHINE_AMIGA
     return 2;               /* we currently only support monochrome */
+#elif defined(MACHINE_IE)
+    return 256;
 #else
     WORD palette;
 
@@ -895,6 +932,8 @@ static __inline__ void get_std_pixel_size(WORD *width,WORD *height)
 void get_pixel_size(WORD *width,WORD *height)
 {
 #ifdef MACHINE_AMIGA
+    get_std_pixel_size(width,height);
+#elif defined(MACHINE_IE)
     get_std_pixel_size(width,height);
 #else
     if (HAS_VIDEL || HAS_TT_SHIFTER)

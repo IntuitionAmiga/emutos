@@ -39,6 +39,10 @@
 #include "coldfire.h"
 #include "amiga.h"
 #include "lisa.h"
+#ifdef MACHINE_IE
+#include "ie_machine.h"
+extern WORD GCURX, GCURY;
+#endif
 
 
 /* forward declarations */
@@ -532,6 +536,59 @@ static void do_key_repeat(void)
  */
 void kb_timerc_int(void)
 {
+#ifdef MACHINE_IE
+    /* Poll IE keyboard MMIO — feed scancodes through kbd_int() pipeline */
+    while (ie_kbd_has_code()) {
+        UBYTE scancode = (UBYTE)ie_kbd_code();
+        kbd_int(scancode);
+    }
+
+    /* Absolute mouse positioning — compute exact deltas from VDI cursor */
+    {
+        static UBYTE last_ikbd_btns = 0;
+        static BOOL first = TRUE;
+
+        if (!first) {
+            UBYTE ie_btns = (UBYTE)ie_mouse_buttons();
+            UWORD raw_x = ie_mouse_x();
+            UWORD raw_y = ie_mouse_y();
+
+            /* Clamp unsigned MMIO values to screen bounds before signed cast */
+            WORD target_x = (raw_x > (UWORD)DEV_TAB[0]) ? DEV_TAB[0] : (WORD)raw_x;
+            WORD target_y = (raw_y > (UWORD)DEV_TAB[1]) ? DEV_TAB[1] : (WORD)raw_y;
+
+            /* Delta from actual VDI cursor position to absolute MMIO target */
+            int dx = target_x - GCURX;
+            int dy = target_y - GCURY;
+
+            /* Remap IE buttons (bit0=left, bit1=right) to IKBD (bit1=left, bit0=right) */
+            UBYTE ikbd_btns = (UBYTE)(((ie_btns & 1) << 1) | ((ie_btns >> 1) & 1));
+            BOOL btn_changed = (ikbd_btns != last_ikbd_btns);
+
+            if (dx != 0 || dy != 0 || btn_changed) {
+                /* Send multiple packets to cover full delta (max +-127 per packet) */
+                do {
+                    SBYTE sdx = (dx > 127) ? 127 : ((dx < -128) ? -128 : (SBYTE)dx);
+                    SBYTE sdy = (dy > 127) ? 127 : ((dy < -128) ? -128 : (SBYTE)dy);
+
+                    SBYTE packet[3];
+                    packet[0] = (SBYTE)(0xF8 | ikbd_btns);
+                    packet[1] = sdx;
+                    packet[2] = sdy;
+                    call_mousevec(packet);
+
+                    dx -= sdx;
+                    dy -= sdy;
+                } while (dx != 0 || dy != 0);
+
+                last_ikbd_btns = ikbd_btns;
+            }
+        } else {
+            first = FALSE;
+        }
+    }
+#endif /* MACHINE_IE */
+
     do_key_repeat();
 }
 
@@ -1082,6 +1139,10 @@ void kbd_init(void)
 
 #ifdef MACHINE_LISA
     lisa_kbd_init();
+#endif
+
+#ifdef MACHINE_IE
+    /* IE keyboard is MMIO-polled, no ACIA/IKBD initialization needed */
 #endif
 
     /* initialize the IKBD */

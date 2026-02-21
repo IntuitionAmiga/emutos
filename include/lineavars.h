@@ -35,7 +35,11 @@ typedef struct _mcs {
         UWORD   *addr;          /* screen address of saved form */
         UBYTE    stat;          /* save status */
         UBYTE   width;          /* width of saved form (16-bit support only) */
+#ifdef MACHINE_IE
+        ULONG   area[16*16];    /* 32-bit truecolor: 16x16 pixels * 4 bytes */
+#else
         ULONG   area[8*16];     /* handle up to 8 video planes (also 16-bit) */
+#endif
 } MCS;
 /* defines for 'stat' above */
 #define MCS_VALID   0x01        /* save area is valid */

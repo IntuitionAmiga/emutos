@@ -31,12 +31,17 @@
 //
 _bzero_nobuiltin:
         move.l   4(sp),a0
+#if __SIZEOF_SIZE_T__ == 2
+        moveq    #0,d0
+        move.w   8(sp),d0
+#else
         move.l   8(sp),d0
+#endif
         move.l   d7,-(sp)
         moveq    #0,d7
         jra      memset
 //
-// void *memset(void *address, short c, unsigned long size)
+// void *memset(void *address, int c, size_t size)
 // fills with byte c, returns the given address.
 
 _memset:
@@ -53,7 +58,12 @@ _memset:
         move.w   d7,d0
         swap     d7
         move.w   d0,d7
+#if __SIZEOF_SIZE_T__ == 2
+        moveq    #0,d0
+        move.w   14(sp),d0
+#else
         move.l   14(sp),d0
+#endif
         jle      end
 
 // at this point, a0=block, d7=pattern, d0=size, (sp)=saved d7

@@ -80,12 +80,21 @@ static ULONG XHDrvMap(void)
 
 static long XHNewCookie(ULONG newcookie)
 {
+#if defined(MACHINE_IE)
+    /*
+     * The IE port currently provides a single built-in XHDI handler.
+     * Reject handler chaining until an IE-native chain handoff is validated.
+     */
+    UNUSED(newcookie);
+    return EINVFN;
+#else
     if (next_handler)
         return next_handler(XHNEWCOOKIE, newcookie);
 
     next_handler = (XHDI_HANDLER)newcookie;
 
     return E_OK;
+#endif
 }
 
 static long XHInqDev2(UWORD drv, UWORD *major, UWORD *minor, ULONG *start,

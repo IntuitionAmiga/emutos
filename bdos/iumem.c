@@ -118,7 +118,7 @@ MD *ffit(long amount, MPB *mp)
 
         /* init new MD for remaining memory on free chain */
         p1->m_length = q->m_length - amount;
-        p1->m_start = q->m_start + amount;
+        p1->m_start = (UBYTE *)((ULONG)q->m_start + amount);
         p1->m_link = q->m_link;
         p->m_link = p1;
 
@@ -205,7 +205,7 @@ void freeit(MD *m, MPB *mp)
      * finally, coalesce free blocks if possible
      */
     if (f)
-        if (p->m_start + p->m_length == f->m_start)
+        if ((UBYTE *)((ULONG)p->m_start + p->m_length) == f->m_start)
         { /* join to higher neighbor */
             p->m_length += f->m_length;
             p->m_link = f->m_link;
@@ -213,7 +213,7 @@ void freeit(MD *m, MPB *mp)
         }
 
     if (q)
-        if (q->m_start + q->m_length == p->m_start)
+        if ((UBYTE *)((ULONG)q->m_start + q->m_length) == p->m_start)
         { /* join to lower neighbor */
             q->m_length += p->m_length;
             q->m_link = p->m_link;
@@ -239,7 +239,7 @@ WORD shrinkit(MD *m, MPB *mp, LONG newlen)
         return -1;
     }
 
-    f->m_start = m->m_start + newlen;
+    f->m_start = (UBYTE *)((ULONG)m->m_start + newlen);
     f->m_length = m->m_length - newlen;
 
     /*

@@ -556,7 +556,8 @@ void umem_init(void)
 
     /* derive the addresses, assuming the MPB is in clean state */
     start_stram = pmd.mp_mfl->m_start;
-    end_stram = start_stram + pmd.mp_mfl->m_length;
+    /* Cast to ULONG to avoid 16-bit ptrdiff_t truncation with -mshort */
+    end_stram = (UBYTE *)((ULONG)start_stram + pmd.mp_mfl->m_length);
     KDEBUG(("umem_init(): start_stram=%p, end_stram=%p\n",start_stram,end_stram));
 
 #if CONF_WITH_ALT_RAM

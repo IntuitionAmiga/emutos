@@ -244,6 +244,7 @@ void disk_init_all(void)
         devices_available |= bitmask;
 
     /* scan for attached harddrives and their partitions */
+#if CONF_WITH_IDE || CONF_WITH_SCSI || CONF_WITH_ARANYM || CONF_WITH_ACSI || CONF_WITH_SDMMC
     for(i = 0; i < ARRAY_SIZE(majors); i++) {
         UWORD unit = NUMFLOPPIES + majors[i];
         disk_init_one(unit,&devices_available);
@@ -252,6 +253,7 @@ void disk_init_all(void)
             break;
         }
     }
+#endif
 
     /* save bitmaps of drives associated with each physical unit.
      * these maps are not changed after booting.

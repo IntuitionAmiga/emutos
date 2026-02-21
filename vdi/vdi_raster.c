@@ -12,6 +12,7 @@
 
 #include "emutos.h"
 #include "asm.h"
+#include "intmath.h"
 #include "vdi_defs.h"
 #include "vdistub.h"
 #include "blitter.h"
@@ -21,6 +22,11 @@
 #include "has.h"        /* for blitter-related items */
 #include "string.h"     /* for bzero() */
 #include "gemdos.h"     /* for mem alloc & free */
+
+#ifdef MACHINE_IE
+#include "../bios/ie_machine.h"
+#include "vdi_inline.h"
+#endif
 
 #ifdef __mcoldfire__
 #define ASM_BLIT_IS_AVAILABLE   0   /* assembler routine does not support ColdFire */
@@ -256,6 +262,71 @@ static void vr_trnfm16(MFDB *src_mfdb, MFDB *dst_mfdb)
 }
 #endif
 
+#ifdef MACHINE_IE
+/*
+ * vr_trnfm_ie - convert between 32-bit standard and device-dependent format
+ *
+ * For IE, device-dependent format IS 32-bit chunky (one ULONG per pixel).
+ * Standard format has 32 sequential planes.  We transpose between these.
+ */
+static void vr_trnfm_ie(MFDB *src_mfdb, MFDB *dst_mfdb)
+{
+    ULONG *src, *dst, *work, *tempbuf = NULL;
+    LONG i, planesize, formsize;
+    ULONG src_mask, dst_mask;
+
+    src = (ULONG *)src_mfdb->fd_addr;
+    dst = (ULONG *)dst_mfdb->fd_addr;
+    planesize = (LONG)src_mfdb->fd_h * src_mfdb->fd_wdwidth;    /* in words */
+    formsize = planesize * sizeof(WORD) * 32;   /* in bytes */
+
+    if (src == dst)
+    {
+        tempbuf = (ULONG *)dos_alloc_anyram(formsize);
+        if (!tempbuf)
+            return;
+        dst = tempbuf;
+    }
+
+    bzero(dst, formsize);
+
+    if (src_mfdb->fd_stand)     /* standard -> device-dependent */
+    {
+        for (dst_mask = 0x80000000UL, work = dst; dst_mask; dst_mask >>= 1, work = dst)
+        {
+            for (i = 0; i < planesize; i++, src++)
+            {
+                for (src_mask = 0x80000000UL; src_mask; src_mask >>= 1, work++)
+                {
+                    if (*src & src_mask)
+                        *work |= dst_mask;
+                }
+            }
+        }
+    }
+    else                        /* device-dependent -> standard */
+    {
+        for (src_mask = 0x80000000UL, work = src; src_mask; src_mask >>= 1, work = src)
+        {
+            for (i = 0; i < planesize; i++, dst++)
+            {
+                for (dst_mask = 0x80000000UL; dst_mask; dst_mask >>= 1, work++)
+                {
+                    if (*work & src_mask)
+                        *dst |= dst_mask;
+                }
+            }
+        }
+    }
+
+    if (tempbuf)
+    {
+        memcpy(dst_mfdb->fd_addr, tempbuf, formsize);
+        dos_free(tempbuf);
+    }
+}
+#endif
+
 /*
  * vdi_vr_trnfm - transform screen bitmaps
  *
@@ -278,6 +349,9 @@ void vdi_vr_trnfm(Vwk * vwk)
     src_mfdb = *(MFDB **)&CONTRL[7];
     dst_mfdb = *(MFDB **)&CONTRL[9];
 
+#ifdef MACHINE_IE
+    if (src_mfdb->fd_nplanes == 32) { vr_trnfm_ie(src_mfdb, dst_mfdb); return; }
+#endif
 #if CONF_WITH_VDI_16BIT
     /*
      * handle an undocumented feature of TOS4 VDI: you must be in a
@@ -959,6 +1033,10 @@ setup_info (struct raster_t *raster, struct blit_frame * info)
     info->s_nxpl = 2;           /* next plane offset (source) */
     info->d_nxpl = 2;           /* next plane offset (destination) */
 
+#ifdef MACHINE_IE
+    if (info->plane_ct == 32)
+        return FALSE;   /* 32-bit chunky: handled by IE raster functions */
+#endif
 #if CONF_WITH_VDI_16BIT
     return (info->plane_ct <= 16) ? FALSE : TRUE;
 #else
@@ -1326,6 +1404,248 @@ static void vrt_cpyfm16(struct blit_frame *info)
 }
 #endif
 
+#ifdef MACHINE_IE
+/*
+ * vro_cpyfm_ie() - handle vro_cpyfm() for 32-bit IE graphics
+ */
+static void vro_cpyfm_ie(struct blit_frame *info)
+{
+    ULONG *src, *dst, *p, *q;
+    WORD src_width, dst_width, next_pixel;
+    WORD mode, rows, cols;
+
+    mode = INTIN[0];
+
+    src_width = info->s_nxln / (WORD)sizeof(ULONG);
+    dst_width = info->d_nxln / (WORD)sizeof(ULONG);
+    next_pixel = 1;
+    src = (ULONG *)info->s_form + ((LONG)info->s_ymin * src_width) + info->s_xmin;
+    dst = (ULONG *)info->d_form + ((LONG)info->d_ymin * dst_width) + info->d_xmin;
+
+    if (src < dst) {
+        src = (ULONG *)info->s_form + ((LONG)info->s_ymax * src_width) + info->s_xmax;
+        dst = (ULONG *)info->d_form + ((LONG)info->d_ymax * dst_width) + info->d_xmax;
+        src_width = -src_width;
+        dst_width = -dst_width;
+        next_pixel = -1;
+    }
+
+    p = src;
+    q = dst;
+    rows = info->s_ymax - info->s_ymin + 1;
+
+    switch(mode) {
+    case BM_ALL_WHITE:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = 0;
+                q += next_pixel;
+            }
+            dst += dst_width; q = dst;
+        }
+        break;
+    case BM_S_AND_D:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = *p & *q; p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_S_AND_NOTD:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = *p & ~*q; p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_S_ONLY:
+        while(rows-- > 0) {
+            cols = info->s_xmax - info->s_xmin + 1;
+            if (src < dst) {
+                while(cols-- > 0) { *q-- = *p--; }
+            } else {
+                while(cols-- > 0) { *q++ = *p++; }
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_NOTS_AND_D:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = ~*p & *q; p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_D_ONLY:
+        break;
+    case BM_S_XOR_D:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = *p ^ *q; p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_S_OR_D:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = *p | *q; p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_NOT_SORD:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = ~(*p | *q); p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_NOT_SXORD:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = ~(*p ^ *q); p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_NOT_D:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = ~*q; q += next_pixel;
+            }
+            dst += dst_width; q = dst;
+        }
+        break;
+    case BM_S_OR_NOTD:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = *p | ~*q; p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_NOT_S:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = ~*p; p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_NOTS_OR_D:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = ~*p | *q; p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_NOT_SANDD:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = ~(*p & *q); p += next_pixel; q += next_pixel;
+            }
+            src += src_width; p = src; dst += dst_width; q = dst;
+        }
+        break;
+    case BM_ALL_BLACK:
+        while(rows-- > 0) {
+            for (cols = info->s_xmax - info->s_xmin + 1; cols > 0; cols--) {
+                *q = 0xFFFFFFFFUL;
+                q += next_pixel;
+            }
+            dst += dst_width; q = dst;
+        }
+        break;
+    }
+}
+
+/*
+ * vrt_cpyfm_ie() - handle vrt_cpyfm() for 32-bit IE graphics
+ */
+static void vrt_cpyfm_ie(struct blit_frame *info)
+{
+    UWORD *src, *p;
+    ULONG *dst, *q;
+    WORD mode, src_width, src_off, dst_width, x, y;
+    UWORD src_mask, bit_mask;
+    ULONG fgcol, bgcol;
+
+    mode = INTIN[0];
+
+    fgcol = ie_vdi_palette[info->fg_col];
+    bgcol = ie_vdi_palette[info->bg_col];
+
+    src_width = info->s_nxln / (WORD)sizeof(WORD);
+    src_off = info->s_xmin >> 4;
+    bit_mask = src_mask = 0x8000U >> (info->s_xmin & 0x000f);
+    p = src = info->s_form + ((LONG)info->s_ymin * src_width) + src_off;
+
+    dst_width = info->d_nxln / (WORD)sizeof(ULONG);
+    q = dst = (ULONG *)info->d_form + ((LONG)info->d_ymin * dst_width) + info->d_xmin;
+
+    switch(mode) {
+    case MD_ERASE:
+        for (y = info->s_ymin; y <= info->s_ymax; y++) {
+            for (x = info->s_xmin; x <= info->s_xmax; x++, q++) {
+                if (!(*p & bit_mask))
+                    *q = bgcol;
+                rorw1(bit_mask);
+                if (bit_mask & 0x8000) p++;
+            }
+            src += src_width; p = src; bit_mask = src_mask;
+            dst += dst_width; q = dst;
+        }
+        break;
+    case MD_XOR:
+        for (y = info->s_ymin; y <= info->s_ymax; y++) {
+            for (x = info->s_xmin; x <= info->s_xmax; x++, q++) {
+                if (*p & bit_mask)
+                    *q = ~*q;
+                rorw1(bit_mask);
+                if (bit_mask & 0x8000) p++;
+            }
+            src += src_width; p = src; bit_mask = src_mask;
+            dst += dst_width; q = dst;
+        }
+        break;
+    case MD_TRANS:
+        for (y = info->s_ymin; y <= info->s_ymax; y++) {
+            for (x = info->s_xmin; x <= info->s_xmax; x++, q++) {
+                if (*p & bit_mask)
+                    *q = fgcol;
+                rorw1(bit_mask);
+                if (bit_mask & 0x8000) p++;
+            }
+            src += src_width; p = src; bit_mask = src_mask;
+            dst += dst_width; q = dst;
+        }
+        break;
+    case MD_REPLACE:
+        for (y = info->s_ymin; y <= info->s_ymax; y++) {
+            for (x = info->s_xmin; x <= info->s_xmax; x++, q++) {
+                if (*p & bit_mask)
+                    *q = fgcol;
+                else
+                    *q = bgcol;
+                rorw1(bit_mask);
+                if (bit_mask & 0x8000) p++;
+            }
+            src += src_width; p = src; bit_mask = src_mask;
+            dst += dst_width; q = dst;
+        }
+        break;
+    default:
+        return;
+    }
+}
+#endif
+
 /* common functionality for vdi_vro_cpyfm, vdi_vrt_cpyfm, linea_raster */
 static void
 cpy_raster(struct raster_t *raster, struct blit_frame *info)
@@ -1364,6 +1684,9 @@ cpy_raster(struct raster_t *raster, struct blit_frame *info)
         info->bg_col = 0;       /* bg:0 & fg:0 => only first OP_TAB */
         info->fg_col = 0;       /* entry will be referenced */
 
+#ifdef MACHINE_IE
+        if (info->plane_ct == 32) { vro_cpyfm_ie(info); return; }
+#endif
 #if CONF_WITH_VDI_16BIT
         if (info->plane_ct > 8)
         {
@@ -1429,6 +1752,9 @@ cpy_raster(struct raster_t *raster, struct blit_frame *info)
             return;                     /* unsupported mode */
         }
 
+#ifdef MACHINE_IE
+        if (info->plane_ct == 32) { vrt_cpyfm_ie(info); return; }
+#endif
 #if CONF_WITH_VDI_16BIT
         if (info->plane_ct > 8)
         {

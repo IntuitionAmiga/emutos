@@ -17,4 +17,12 @@ static __inline__ UWORD *get_start_addr16(const WORD x, const WORD y)
 }
 #endif
 
+#ifdef MACHINE_IE
+#include "../bios/ie_machine.h"
+static __inline__ ULONG *get_start_addr_ie(const WORD x, const WORD y)
+{
+    return (ULONG *)(v_bas_ad + (x * sizeof(ULONG)) + muls(y, v_lin_wr));
+}
+#endif
+
 #endif                          /* _VDI_INLINE_H */

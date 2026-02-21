@@ -126,7 +126,7 @@ static LONG pgmld01(FH h, PD *pdptr, PGMHDR01 *hd)
 
     pi->pi_blen = hd->h01_blen;
     pi->pi_slen = hd->h01_slen;
-    pi->pi_tpalen = p->p_hitpa - p->p_lowtpa - sizeof(PD);
+    pi->pi_tpalen = (LONG)((ULONG)p->p_hitpa - (ULONG)p->p_lowtpa - (ULONG)sizeof(PD));
     pi->pi_tbase = (UBYTE *) (p+1);     /*  1st byte after PD   */
     pi->pi_bbase = pi->pi_tbase + flen;
     pi->pi_dbase = pi->pi_tbase + pi->pi_tlen;
@@ -298,7 +298,7 @@ LONG kpgm_relocate(PD *p, long length)
 
     pi->pi_blen = hd->h01_blen;
     pi->pi_slen = hd->h01_slen;
-    pi->pi_tpalen = p->p_hitpa - p->p_lowtpa - sizeof(PD);
+    pi->pi_tpalen = (LONG)((ULONG)p->p_hitpa - (ULONG)p->p_lowtpa - (ULONG)sizeof(PD));
     pi->pi_tbase = (UBYTE *)(p+1);      /*  1st byte after PD   */
     pi->pi_bbase = pi->pi_tbase + flen;
     pi->pi_dbase = pi->pi_tbase + pi->pi_tlen;

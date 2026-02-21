@@ -17,9 +17,13 @@
 
 #define HAVE_BEZIER 0           /* switch on bezier capability - entirely untested */
 
-#define EXTENDED_PALETTE (CONF_WITH_VIDEL || CONF_WITH_TT_SHIFTER)
+#define EXTENDED_PALETTE (CONF_WITH_VIDEL || CONF_WITH_TT_SHIFTER || defined(MACHINE_IE))
 
 #define TRUECOLOR_MODE  (v_planes > 8)
+
+#ifdef MACHINE_IE
+extern ULONG ie_vdi_palette[256];
+#endif
 
 
 #if CONF_WITH_VIDEL

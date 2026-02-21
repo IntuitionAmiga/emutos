@@ -22,6 +22,10 @@
 #include "vdi_inline.h"
 #include "has.h"        /* for blitter-related items */
 
+#ifdef MACHINE_IE
+#include "../bios/ie_machine.h"
+#endif
+
 
 /*
  * private structure for parameter passing
@@ -551,6 +555,104 @@ static void OPTIMIZE_SMALL swblit_rect_common16(const VwkAttrib *attr, const Rec
 }
 #endif
 
+#ifdef MACHINE_IE
+/*
+ * swblit_rect_common_ie - draw one or more horizontal lines, 32-bit IE mode
+ */
+static void OPTIMIZE_SMALL swblit_rect_common_ie(const VwkAttrib *attr, const Rect *rect)
+{
+    const UWORD patmsk = attr->patmsk;
+    const int yinc = v_lin_wr / (int)sizeof(ULONG);
+    ULONG *addr, *work;
+    ULONG bgcol, fgcol;
+    UWORD mask, pattern;
+    int x, y, patind;
+
+    addr = get_start_addr_ie(rect->x1, rect->y1);
+    fgcol = ie_vdi_palette[attr->color];
+    bgcol = ie_vdi_palette[0];
+
+    switch(attr->wrt_mode) {
+    case WM_ERASE:
+        for (y = rect->y1; y <= rect->y2; y++, addr += yinc) {
+            work = addr;
+            patind = patmsk & y;
+            pattern = attr->patptr[patind];
+            if (pattern == 0x0000) {
+                for (x = rect->x1; x <= rect->x2; x++)
+                    *work++ = fgcol;
+            } else {
+                mask = 1U << (15 - (rect->x1 & 0x000f));
+                for (x = rect->x1; x <= rect->x2; x++, work++) {
+                    if (!(pattern & mask))
+                        *work = fgcol;
+                    rorw1(mask);
+                }
+            }
+        }
+        break;
+    case WM_XOR:
+        for (y = rect->y1; y <= rect->y2; y++, addr += yinc) {
+            work = addr;
+            patind = patmsk & y;
+            pattern = attr->patptr[patind];
+            if (pattern == 0xffff) {
+                for (x = rect->x1; x <= rect->x2; x++) {
+                    *work = ~*work;
+                    work++;
+                }
+            } else {
+                mask = 1U << (15 - (rect->x1 & 0x000f));
+                for (x = rect->x1; x <= rect->x2; x++, work++) {
+                    if (pattern & mask)
+                        *work = ~*work;
+                    rorw1(mask);
+                }
+            }
+        }
+        break;
+    case WM_TRANS:
+        for (y = rect->y1; y <= rect->y2; y++, addr += yinc) {
+            work = addr;
+            patind = patmsk & y;
+            pattern = attr->patptr[patind];
+            if (pattern == 0xffff) {
+                for (x = rect->x1; x <= rect->x2; x++)
+                    *work++ = fgcol;
+            } else {
+                mask = 1U << (15 - (rect->x1 & 0x000f));
+                for (x = rect->x1; x <= rect->x2; x++, work++) {
+                    if (pattern & mask)
+                        *work = fgcol;
+                    rorw1(mask);
+                }
+            }
+        }
+        break;
+    default:    /* replace */
+        for (y = rect->y1; y <= rect->y2; y++, addr += yinc) {
+            work = addr;
+            patind = patmsk & y;
+            pattern = attr->patptr[patind];
+            if (pattern == 0xffff) {
+                for (x = rect->x1; x <= rect->x2; x++)
+                    *work++ = fgcol;
+            } else {
+                mask = 1U << (15 - (rect->x1 & 0x000f));
+                for (x = rect->x1; x <= rect->x2; x++) {
+                    if (pattern & mask)
+                        *work++ = fgcol;
+                    else
+                        *work++ = bgcol;
+                    rorw1(mask);
+                }
+            }
+        }
+        break;
+    }
+}
+#endif
+
 
 /*
  * swblit_rect_common - draw one or more horizontal lines via software
@@ -791,6 +893,9 @@ static void OPTIMIZE_SMALL swblit_rect_common(const VwkAttrib *attr, const Rect 
  */
 void draw_rect_common(const VwkAttrib *attr, const Rect *rect)
 {
+#ifdef MACHINE_IE
+    if (TRUECOLOR_MODE) { swblit_rect_common_ie(attr, rect); return; }
+#endif
 #if CONF_WITH_VDI_16BIT
     if (TRUECOLOR_MODE)
         swblit_rect_common16(attr, rect);
@@ -1770,6 +1875,136 @@ static void draw_line16(const Line *line, WORD wrt_mode, UWORD color)
 }
 #endif
 
+#ifdef MACHINE_IE
+/*
+ * draw_line_ie - draw a line (general purpose) in 32-bit IE mode
+ */
+static void draw_line_ie(const Line *line, WORD wrt_mode, UWORD color)
+{
+    ULONG *addr;
+    ULONG bgcol, fgcol;
+    UWORD linemask;
+    WORD dx, dy, yinc;
+    WORD eps, e1, e2;
+    WORD loopcnt;
+
+    dx = line->x2 - line->x1;
+    dy = line->y2 - line->y1;
+    yinc = v_lin_wr / (WORD)sizeof(ULONG);
+
+    if (dy < 0) {
+        dy = -dy;
+        yinc = -yinc;
+    }
+
+    addr = get_start_addr_ie(line->x1, line->y1);
+    fgcol = ie_vdi_palette[color];
+    bgcol = ie_vdi_palette[0];
+
+    linemask = LN_MASK;
+
+    if (dx >= dy) {
+        e1 = 2*dy;
+        eps = -dx;
+        e2 = 2*dx;
+
+        switch(wrt_mode) {
+        case WM_ERASE:
+            for (loopcnt = dx; loopcnt >= 0; loopcnt--) {
+                rolw1(linemask);
+                if (!(linemask&0x0001))
+                    *addr = fgcol;
+                addr++;
+                eps += e1;
+                if (eps >= 0) { eps -= e2; addr += yinc; }
+            }
+            break;
+        case WM_XOR:
+            for (loopcnt = dx; loopcnt >= 0; loopcnt--) {
+                rolw1(linemask);
+                if (linemask&0x0001)
+                    *addr = ~*addr;
+                addr++;
+                eps += e1;
+                if (eps >= 0) { eps -= e2; addr += yinc; }
+            }
+            break;
+        case WM_TRANS:
+            for (loopcnt = dx; loopcnt >= 0; loopcnt--) {
+                rolw1(linemask);
+                if (linemask&0x0001)
+                    *addr = fgcol;
+                addr++;
+                eps += e1;
+                if (eps >= 0) { eps -= e2; addr += yinc; }
+            }
+            break;
+        case WM_REPLACE:
+            for (loopcnt = dx; loopcnt >= 0; loopcnt--) {
+                rolw1(linemask);
+                if (linemask&0x0001)
+                    *addr = fgcol;
+                else
+                    *addr = bgcol;
+                addr++;
+                eps += e1;
+                if (eps >= 0) { eps -= e2; addr += yinc; }
+            }
+        }
+    } else {
+        e1 = 2*dx;
+        eps = -dy;
+        e2 = 2*dy;
+
+        switch(wrt_mode) {
+        case WM_ERASE:
+            for (loopcnt = dy; loopcnt >= 0; loopcnt--) {
+                rolw1(linemask);
+                if (!(linemask&0x0001))
+                    *addr = fgcol;
+                addr += yinc;
+                eps += e1;
+                if (eps >= 0) { eps -= e2; addr++; }
+            }
+            break;
+        case WM_XOR:
+            for (loopcnt = dy; loopcnt >= 0; loopcnt--) {
+                rolw1(linemask);
+                if (linemask&0x0001)
+                    *addr = ~*addr;
+                addr += yinc;
+                eps += e1;
+                if (eps >= 0) { eps -= e2; addr++; }
+            }
+            break;
+        case WM_TRANS:
+            for (loopcnt = dy; loopcnt >= 0; loopcnt--) {
+                rolw1(linemask);
+                if (linemask&0x0001)
+                    *addr = fgcol;
+                addr += yinc;
+                eps += e1;
+                if (eps >= 0) { eps -= e2; addr++; }
+            }
+            break;
+        case WM_REPLACE:
+            for (loopcnt = dy; loopcnt >= 0; loopcnt--) {
+                rolw1(linemask);
+                if (linemask&0x0001)
+                    *addr = fgcol;
+                else
+                    *addr = bgcol;
+                addr += yinc;
+                eps += e1;
+                if (eps >= 0) { eps -= e2; addr++; }
+            }
+        }
+    }
+
+    LN_MASK = linemask;
+}
+#endif
+
 
 /*
  * draw_line - draw a line (general purpose)
@@ -2145,6 +2380,71 @@ static void swblit_vertical_line16(const Line *line, WORD wrt_mode, UWORD color)
 }
 #endif
 
+#ifdef MACHINE_IE
+/*
+ * swblit_vertical_line_ie - draw a vertical line in 32-bit IE mode
+ */
+static void swblit_vertical_line_ie(const Line *line, WORD wrt_mode, UWORD color)
+{
+    ULONG *addr;
+    WORD dy, yinc, loopcnt;
+    ULONG bgcol, fgcol;
+    UWORD linemask;
+
+    dy = line->y2 - line->y1;
+    yinc = v_lin_wr / (WORD)sizeof(ULONG);
+
+    if (dy < 0) {
+        dy = -dy;
+        yinc = -yinc;
+    }
+
+    addr = get_start_addr_ie(line->x1, line->y1);
+    fgcol = ie_vdi_palette[color];
+    bgcol = ie_vdi_palette[0];
+
+    linemask = LN_MASK;
+
+    switch(wrt_mode) {
+    case WM_ERASE:
+        for (loopcnt = dy; loopcnt >= 0; loopcnt--) {
+            rolw1(linemask);
+            if (!(linemask & 0x0001))
+                *addr = fgcol;
+            addr += yinc;
+        }
+        break;
+    case WM_XOR:
+        for (loopcnt = dy; loopcnt >= 0; loopcnt--) {
+            rolw1(linemask);
+            if (linemask & 0x0001)
+                *addr = ~*addr;
+            addr += yinc;
+        }
+        break;
+    case WM_TRANS:
+        for (loopcnt = dy; loopcnt >= 0; loopcnt--) {
+            rolw1(linemask);
+            if (linemask & 0x0001)
+                *addr = fgcol;
+            addr += yinc;
+        }
+        break;
+    case WM_REPLACE:
+        for (loopcnt = dy; loopcnt >= 0; loopcnt--) {
+            rolw1(linemask);
+            if (linemask & 0x0001)
+                *addr = fgcol;
+            else
+                *addr = bgcol;
+            addr += yinc;
+        }
+    }
+
+    LN_MASK = linemask;
+}
+#endif
+
 /*
  * vertical_line - draw a vertical line
  *
@@ -2273,6 +2573,14 @@ void abline(const Line *line, const WORD wrt_mode, UWORD color)
      * optimize drawing of vertical lines
      */
     if (line->x1 == line->x2) {
+#ifdef MACHINE_IE
+        if (TRUECOLOR_MODE)
+        {
+            swblit_vertical_line_ie(line, wrt_mode, color);
+            return;
+        }
+        else
+#endif
 #if CONF_WITH_VDI_16BIT
         if (TRUECOLOR_MODE)
         {
@@ -2353,6 +2661,11 @@ void abline(const Line *line, const WORD wrt_mode, UWORD color)
     ordered.y1 = y1;
     ordered.x2 = x2;
     ordered.y2 = y2;
+#ifdef MACHINE_IE
+    if (TRUECOLOR_MODE)
+        draw_line_ie(&ordered, wrt_mode, color);
+    else
+#endif
 #if CONF_WITH_VDI_16BIT
     if (TRUECOLOR_MODE)
         draw_line16(&ordered, wrt_mode, color);

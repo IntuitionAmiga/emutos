@@ -23,6 +23,10 @@
 #include "biosext.h"
 #include "lineavars.h"
 #include "vdi_inline.h"
+
+#ifdef MACHINE_IE
+#include "../bios/ie_machine.h"
+#endif
 #if WITH_AES
 #include "../aes/aesstub.h"
 #endif
@@ -769,6 +773,72 @@ static void cur_display16(Mcdb *sprite, MCS *mcs, WORD x, WORD y)
 }
 #endif
 
+#ifdef MACHINE_IE
+/*
+ * cur_display_ie() - blits mouse cursor to 32-bit IE screen
+ */
+static void cur_display_ie(Mcdb *sprite, MCS *mcs, WORD x, WORD y)
+{
+    UWORD *mask_start;
+    ULONG *dst, *save;
+    ULONG bgcol, fgcol;
+    UWORD bgmask, fgmask;
+    WORD dst_inc, i, rows, shift, width;
+
+    x -= sprite->xhot;
+    y -= sprite->yhot;
+
+    mask_start = sprite->maskdata;
+    if (y < 0) {
+        rows = y + MOUSE_HEIGHT;
+        mask_start -= y * sizeof(UWORD);
+        y = 0;
+    } else if (y > (yres + 1 - MOUSE_HEIGHT)) {
+        rows = yres + 1 - y;
+    } else {
+        rows = MOUSE_HEIGHT;
+    }
+
+    shift = 0;
+    if (x < 0) {
+        width = x + MOUSE_WIDTH;
+        shift = -x;
+        x = 0;
+    } else if (x > (xres + 1 - MOUSE_WIDTH)) {
+        width = xres + 1 - x;
+    } else {
+        width = MOUSE_WIDTH;
+    }
+
+    dst = get_start_addr_ie(x, y);
+    dst_inc = v_lin_wr / (WORD)sizeof(ULONG) - width;
+
+    save = (ULONG *)mcs->area;
+
+    mcs->len = rows;
+    mcs->addr = (UWORD *)dst;
+    mcs->stat |= MCS_VALID;
+    mcs->width = width;
+
+    bgcol = ie_vdi_palette[sprite->bg_col];
+    fgcol = ie_vdi_palette[sprite->fg_col];
+    while (rows-- > 0) {
+        bgmask = *mask_start++;
+        bgmask <<= shift;
+        fgmask = *mask_start++;
+        fgmask <<= shift;
+        for (i = 0; i < width; i++, dst++, bgmask<<=1, fgmask<<=1) {
+            *save++ = *dst;
+            if (fgmask & 0x8000)
+                *dst = fgcol;
+            else if (bgmask & 0x8000)
+                *dst = bgcol;
+        }
+        dst += dst_inc;
+    }
+}
+#endif
+
 
 
 /*
@@ -882,6 +952,12 @@ void cur_display (Mcdb *sprite, MCS *mcs, WORD x, WORD y)
     UWORD cdb_mask;             /* for checking cdb_bg/cdb_fg */
     ULONG *save;
 
+#ifdef MACHINE_IE
+    if (TRUECOLOR_MODE) {
+        cur_display_ie(sprite, mcs, x, y);
+        return;
+    }
+#endif
 #if CONF_WITH_VDI_16BIT
     /*
      * handle 16-bit VDI in separate function
@@ -1050,6 +1126,31 @@ static void cur_replace16(MCS *mcs)
 }
 #endif
 
+#ifdef MACHINE_IE
+/*
+ * cur_replace_ie - replace cursor with saved data (for 32-bit IE screen)
+ */
+static void cur_replace_ie(MCS *mcs)
+{
+    ULONG *addr, *dst, *src;
+    UWORD row, col;
+
+    if (!(mcs->stat & MCS_VALID))
+        return;
+    mcs->stat &= ~MCS_VALID;
+
+    addr = (ULONG *)mcs->addr;
+    src = (ULONG *)mcs->area;
+
+    for (row = mcs->len, dst = addr; row > 0; row--, dst = addr) {
+        for (col = mcs->width; col > 0; col--) {
+            *dst++ = *src++;
+        }
+        addr += v_lin_wr / sizeof(ULONG);
+    }
+}
+#endif
+
 
 
 /*
@@ -1070,6 +1171,12 @@ void cur_replace (MCS *mcs)
     const WORD inc = v_planes;      /* # words to next word in same plane */
     const WORD dst_inc = v_lin_wr >> 1; /* # words in a scan line */
 
+#ifdef MACHINE_IE
+    if (TRUECOLOR_MODE) {
+        cur_replace_ie(mcs);
+        return;
+    }
+#endif
 #if CONF_WITH_VDI_16BIT
     /*
      * handle 16-bit VDI in separate function

@@ -624,6 +624,31 @@
 #endif
 
 /*
+ * Defaults for the Intuition Engine machine
+ */
+#ifdef MACHINE_IE
+# ifndef CONF_ATARI_HARDWARE
+#  define CONF_ATARI_HARDWARE 0
+# endif
+# ifndef CONF_STRAM_SIZE
+#  define CONF_STRAM_SIZE 4*1024*1024
+# endif
+# ifndef CONF_WITH_TTRAM
+#  define CONF_WITH_TTRAM 0
+# endif
+# ifndef CONF_WITH_ALT_RAM
+#  define CONF_WITH_ALT_RAM 0
+# endif
+# ifndef CONF_WITH_ADVANCED_CPU
+#  define CONF_WITH_ADVANCED_CPU 1
+# endif
+# ifndef USE_STOP_INSN_TO_FREE_HOST_CPU
+#  define USE_STOP_INSN_TO_FREE_HOST_CPU 1
+# endif
+# define INITINFO_DURATION 0
+#endif
+
+/*
  * Defaults for the M548x machine
  */
 #ifdef MACHINE_M548X

@@ -129,7 +129,16 @@ WORD get_floppy_type(void)
  */
 BOOL nvdi_cookie_present(void)
 {
+#ifdef MACHINE_IE
+    /*
+     * IE uses the native EmuTOS VDI/AES stack and does not support NVDI.
+     * Skip cookie probing here to avoid repeated fault loops during early
+     * bring-up if the cookie jar is not yet stable.
+     */
+    return FALSE;
+#else
     ULONG dummy;
     return cookie_get(COOKIE_NVDI, &dummy);
+#endif
 }
 #endif

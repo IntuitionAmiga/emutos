@@ -285,7 +285,7 @@ static long makopn(FCB *f, DND *dn, int h, int mod)
     /* no need to zero o_curcl & o_curbyt, since MGET zeroes the OFD */
     p->o_dnode = dn;                /*  link to directory           */
     p->o_dirfil = dn->d_ofd;        /*  link to dir's OFD           */
-    p->o_dirbyt = dn->d_ofd->o_bytnum - sizeof(FCB);    /* offset of fcb in dir */
+    p->o_dirbyt = dn->d_ofd->o_bytnum - (long)sizeof(FCB);    /* offset of fcb in dir */
 
     for (p2 = dn->d_files; p2; p2 = p2->o_link)
         if (p2->o_dirbyt == p->o_dirbyt)

@@ -39,6 +39,22 @@ struct param rel_pblock;        /* mouse parameter block */
 
 void Initmous(WORD type, struct param *param, PFVOID newvec)
 {
+#ifdef MACHINE_IE
+    /* IE has no IKBD — skip all ikbd_writeb() calls.
+     * Just install/disable the mouse vector. */
+    switch (type) {
+    case 0:
+        kbdvecs.mousevec = just_rts;  /* disable */
+        return;
+    case 1: case 2: case 4:
+        kbdvecs.mousevec = (newvec != NULL) ? newvec : just_rts;
+        return;
+    default:
+        kbdvecs.mousevec = just_rts;  /* unknown type: match error path at line 120 */
+        return;
+    }
+#endif
+
     long retval = -1;           /* ok, if it stays so... */
     struct param *p = param;   /* pointer to parameter block */
 

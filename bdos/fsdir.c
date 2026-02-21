@@ -1595,7 +1595,7 @@ FCB *scan(DND *dnd, const char *n, WORD att, LONG *posp)
 
     if (*posp == -1)
     {       /*  seek to position of found entry  */
-        ixlseek(fd,fd->o_bytnum - sizeof(FCB));
+        ixlseek(fd,fd->o_bytnum - (long)sizeof(FCB));
         return (FCB *)dnd1;
     }
 
@@ -1671,7 +1671,7 @@ static DND *makdnd(DND *p, FCB *fcb)
     swpw(p1->d_strtcl);
     p1->d_drv = p->d_drv;
     p1->d_dirfil = fd;
-    p1->d_dirpos = fd->o_bytnum - sizeof(FCB);
+    p1->d_dirpos = fd->o_bytnum - (long)sizeof(FCB);
     p1->d_td.time = fcb->f_td.time; /* note: DND time/date are  */
     p1->d_td.date = fcb->f_td.date; /*  actually little-endian! */
     memcpy(p1->d_name, fcb->f_name, FNAMELEN);

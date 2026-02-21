@@ -21,6 +21,10 @@
 #include "lineavars.h"
 #include "vdi_inline.h"
 
+#ifdef MACHINE_IE
+#include "../bios/ie_machine.h"
+#endif
+
 extern Vwk phys_work;           /* attribute area for physical workstation */
 
 #define OVERLAY_BIT 0x0020      /* for 16-bit resolutions */
@@ -32,6 +36,9 @@ extern Vwk phys_work;           /* attribute area for physical workstation */
 
 /* Global variables */
 static UWORD search_color;      /* selected colour for contourfill() */
+#ifdef MACHINE_IE
+static ULONG ie_search_color;   /* 32-bit RGBA search colour for IE contourfill */
+#endif
 static BOOL seed_type;          /* 1 => fill until selected colour is NOT found */
                                 /* 0 => fill until selected colour is found */
 
@@ -689,6 +696,12 @@ pixelread(const WORD x, const WORD y)
     return get_color(mask, addr);       /* return the composed color value */
 }
 
+#ifdef MACHINE_IE
+static ULONG pixelread_ie(const WORD x, const WORD y)
+{
+    return *get_start_addr_ie(x, y);
+}
+#endif
 
 
 #if CONF_WITH_VDI_16BIT
@@ -767,6 +780,35 @@ static WORD end_pts16(const VwkClip *clip, WORD x, WORD y, WORD *xleftout, WORD 
 }
 #endif
 
+#ifdef MACHINE_IE
+static UWORD search_to_right_ie(const VwkClip *clip, WORD x,
+                                 const ULONG search_col, ULONG *addr)
+{
+    for ( ; x <= clip->xmx_clip; x++)
+        if (*addr++ != search_col) break;
+    return x - 1;
+}
+
+static UWORD search_to_left_ie(const VwkClip *clip, WORD x,
+                                const ULONG search_col, ULONG *addr)
+{
+    for ( ; x >= clip->xmn_clip; x--)
+        if (*addr-- != search_col) break;
+    return x + 1;
+}
+
+static WORD end_pts_ie(const VwkClip *clip, WORD x, WORD y,
+                        WORD *xleftout, WORD *xrightout)
+{
+    ULONG *addr = get_start_addr_ie(x, y);
+    ULONG color = *addr;
+    *xrightout = search_to_right_ie(clip, x, color, addr);
+    *xleftout = search_to_left_ie(clip, x, color, addr);
+    if (color != ie_search_color)
+        return seed_type ^ 1;
+    return seed_type ^ 0;
+}
+#endif
 
 
 static UWORD
@@ -843,6 +885,10 @@ static WORD end_pts(const VwkClip *clip, WORD x, WORD y, WORD *xleftout, WORD *x
     if ( y < clip->ymn_clip || y > clip->ymx_clip)
         return 0;
 
+#ifdef MACHINE_IE
+    if (TRUECOLOR_MODE)
+        return end_pts_ie(clip, x, y, xleftout, xrightout);
+#endif
 #if CONF_WITH_VDI_16BIT
     if (TRUECOLOR_MODE)
     {
@@ -970,12 +1016,20 @@ void contourfill(const VwkAttrib * attr, const VwkClip *clip)
 
     if ((WORD)search_color < 0) {
         search_color = pixelread(xleft,oldy);
+#ifdef MACHINE_IE
+        if (TRUECOLOR_MODE)
+            ie_search_color = pixelread_ie(xleft, oldy);
+#endif
         seed_type = 1;
     } else {
         /* Range check the color and convert the index to a pixel value */
         if (search_color >= numcolors)
             return;
         search_color = MAP_COL[search_color];
+#ifdef MACHINE_IE
+        if (TRUECOLOR_MODE)
+            ie_search_color = ie_vdi_palette[search_color];
+#endif
 #if CONF_WITH_VDI_16BIT
         if (TRUECOLOR_MODE)
         {
@@ -1101,6 +1155,19 @@ void vdi_v_get_pixel(Vwk * vwk)
     /* Get the requested pixel */
     pel = (WORD)pixelread(x,y);
 
+#ifdef MACHINE_IE
+    if (TRUECOLOR_MODE) {
+        ULONG px = pixelread_ie(x, y);
+        WORD idx;
+        for (idx = 0; idx < 256; idx++) {
+            if (ie_vdi_palette[idx] == px) break;
+        }
+        if (idx >= 256) idx = 0;
+        INTOUT[0] = idx;
+        INTOUT[1] = REV_MAP_COL[idx];
+        return;
+    }
+#endif
 #if CONF_WITH_VDI_16BIT
     if (TRUECOLOR_MODE)
     {
@@ -1165,6 +1232,16 @@ put_pix(void)
     const WORD x = PTSIN[0];
     const WORD y = PTSIN[1];
 
+#ifdef MACHINE_IE
+    if (TRUECOLOR_MODE) {
+        ULONG *ie_addr = get_start_addr_ie(x, y);
+        ULONG *lo = get_start_addr_ie(0, 0);
+        ULONG *hi = get_start_addr_ie(V_REZ_HZ-1, V_REZ_VT-1);
+        if (ie_addr < lo || ie_addr > hi) return;
+        *ie_addr = ie_vdi_palette[(UWORD)INTIN[0] & 0xFF];
+        return;
+    }
+#endif
 #if CONF_WITH_VDI_16BIT
     if (TRUECOLOR_MODE)
     {

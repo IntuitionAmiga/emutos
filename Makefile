@@ -205,7 +205,22 @@ NODEP += %.c %.h %.pot
 # Override with 1 to use the ELF toolchain instead of the MiNT one
 ELF = 0
 
-ifeq (1,$(ELF))
+# m68k-linux-gnu toolchain (Ubuntu/Debian cross-compiler, GCC 13)
+ifeq (1,$(LINUX))
+TOOLCHAIN_PREFIX = m68k-linux-gnu-
+TOOLCHAIN_GCC_VERSION = -13
+# -fno-builtin: the linux toolchain defines size_t as unsigned int (2 bytes)
+#   with -mshort, but hand-written asm (memset.S, memmove.S) reads size as
+#   move.l (4 bytes) matching the MiNT ABI.  -fno-builtin prevents GCC from
+#   auto-converting loops into memset/memcpy calls with the wrong parameter
+#   width.  The asm functions themselves are patched to zero-extend 16-bit
+#   size values.
+# -fno-ivopts -fno-tree-slsr: work around m68k-linux-gnu GCC ICE in
+#   immed_wide_int_const_1 triggered by ivopts and slsr passes with -mshort.
+TOOLCHAIN_CFLAGS = -fleading-underscore -Wa,--register-prefix-optional -fno-reorder-functions --param=min-pagesize=0 -DELF_TOOLCHAIN -DMACHINE_IE -fno-builtin -fno-ivopts -fno-tree-slsr
+# Appended AFTER WARNFLAGS to override -Werror=format (ptrdiff_t/size_t width diffs)
+TOOLCHAIN_WARNFIX = -Wno-error=format
+else ifeq (1,$(ELF))
 # Standard ELF toolchain
 TOOLCHAIN_PREFIX = m68k-elf-
 TOOLCHAIN_CFLAGS = -fleading-underscore -Wa,--register-prefix-optional -fno-reorder-functions --param=min-pagesize=0 -DELF_TOOLCHAIN
@@ -229,9 +244,13 @@ LDFLAGS = -Wl,-T,obj/emutospp.ld
 PCREL_LDFLAGS = -Wl,--oformat=binary,-Ttext=0,--entry=0
 
 # C compiler
-CC = $(TOOLCHAIN_PREFIX)gcc
+CC = $(TOOLCHAIN_PREFIX)gcc$(TOOLCHAIN_GCC_VERSION)
 CPP = $(CC) -E
 CPUFLAGS = -m68000
+# MACHINE_IE targets 68020 for proper exception frame handling
+ifneq (,$(findstring MACHINE_IE,$(TOOLCHAIN_CFLAGS)))
+CPUFLAGS = -m68020
+endif
 MULTILIBFLAGS = $(CPUFLAGS) -mshort
 INC = -Iinclude
 OTHERFLAGS = -fomit-frame-pointer -fno-common
@@ -265,7 +284,7 @@ endif
 endif
 
 DEFINES = $(LOCALCONF) -DWITH_AES=$(WITH_AES) -DWITH_CLI=$(WITH_CLI) $(DEF)
-CFLAGS_COMPILE = $(TOOLCHAIN_CFLAGS) $(OPTFLAGS) $(OTHERFLAGS) $(WARNFLAGS)
+CFLAGS_COMPILE = $(TOOLCHAIN_CFLAGS) $(OPTFLAGS) $(OTHERFLAGS) $(WARNFLAGS) $(TOOLCHAIN_WARNFIX)
 CFLAGS = $(MULTILIBFLAGS) $(CFLAGS_COMPILE) $(INC) $(DEFINES)
 
 CPPFLAGS = $(CFLAGS)
@@ -310,6 +329,12 @@ bios_src +=  memory.S processor.S vectors.S aciavecs.S bios.c xbios.c acsi.c \
              delay.c delayasm.S sd.c memory2.c bootparams.c scsi.c nova.c \
              dsp.c dsp2.S \
              scsidriv.c
+
+# Optional platform source files injected by external targets.
+bios_src += $(EXTRA_BIOS_SRC)
+
+# Intuition Engine platform support
+bios_src += ie_kbd.c ie_mouse.c ie_screen.c ie_sound.c ie_timer.c
 
 ifeq (1,$(COLDFIRE))
   bios_src += coldfire.c coldfire2.S spi_cf.c

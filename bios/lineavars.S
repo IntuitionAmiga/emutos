@@ -12,7 +12,7 @@
 
 #include "asmdefs.h"
 
-#define EXTENDED_PALETTE (CONF_WITH_VIDEL || CONF_WITH_TT_SHIFTER)
+#define EXTENDED_PALETTE (CONF_WITH_VIDEL || CONF_WITH_TT_SHIFTER || defined(MACHINE_IE))
 
                 .bss
 
@@ -353,5 +353,9 @@ _ext_save_len:  .ds.w   1           // 1630 height of saved form
 _ext_save_addr: .ds.l   1           // 1632 screen addr of saved form
 _ext_save_stat: .ds.b   1           // 1636 save status
                 .ds.b   1
+#ifdef MACHINE_IE
+_ext_save_area: .ds.l   256         // 16x16 x 4 bytes = 1024 bytes
+#else
 _ext_save_area: .ds.l   128         // 1638 form save area
+#endif
 #endif

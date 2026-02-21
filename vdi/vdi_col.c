@@ -15,6 +15,10 @@
 #include "xbiosbind.h"
 #include "lineavars.h"
 
+#ifdef MACHINE_IE
+#include "../bios/ie_machine.h"
+#endif
+
 #if EXTENDED_PALETTE
 #define MAXCOLOURS  256
 #else
@@ -650,6 +654,37 @@ static void vs_color16(Vwk *vwk)
 #endif
 
 
+#ifdef MACHINE_IE
+ULONG ie_vdi_palette[256];
+
+static void set_color_ie(WORD colnum, WORD *rgb)
+{
+    /* Index by VDI pen number directly — rendering functions use pen numbers,
+     * not hardware register numbers.  MAP_COL is only for real HW palettes.
+     * Cast to long before multiply: with -mshort, int is 16-bit and
+     * 1000*255=255000 overflows int16 (max 32767). */
+    UBYTE r = (UBYTE)(((long)rgb[0] * 255 + 500) / 1000);
+    UBYTE g = (UBYTE)(((long)rgb[1] * 255 + 500) / 1000);
+    UBYTE b = (UBYTE)(((long)rgb[2] * 255 + 500) / 1000);
+    ie_vdi_palette[colnum] = ie_rgba(r, g, b, 0xFF);
+}
+
+static void vs_color_ie(void)
+{
+    WORD colnum = INTIN[0];
+    WORD i, *intin, rgb[3], *rgbptr;
+    if (colnum < 0 || colnum >= numcolors) return;
+    for (i = 0, intin = INTIN+1, rgbptr = rgb; i < 3; i++, intin++, rgbptr++) {
+        REQ_COL[colnum][i] = *intin;
+        if (*intin > 1000) *rgbptr = 1000;
+        else if (*intin < 0) *rgbptr = 0;
+        else *rgbptr = *intin;
+    }
+    set_color_ie(colnum, rgb);
+}
+#endif
+
+
 /*
  * vdi_vs_color - set color index table
  */
@@ -657,6 +692,10 @@ void vdi_vs_color(Vwk *vwk)
 {
     WORD colnum, i;
     WORD *intin, rgb[3], *rgbptr;
+
+#ifdef MACHINE_IE
+    if (TRUECOLOR_MODE) { vs_color_ie(); return; }
+#endif
 
 #if CONF_WITH_VDI_16BIT
     if (TRUECOLOR_MODE)
@@ -745,6 +784,21 @@ void init_colors(void)
     /* set up reverse mapping (hardware colour register -> vdi pen) */
     for (i = 0; i < numcolors; i++)
         REV_MAP_COL[MAP_COL[i]] = i;
+
+#ifdef MACHINE_IE
+    for (i = 0; i < 256; i++)
+        ie_vdi_palette[i] = ie_rgba(0, 0, 0, 0xFF);
+    for (i = 0; i < 16; i++)
+        set_color_ie(i, (WORD *)st_palette[i]);
+    /* IE has no hardware palette registers — MAP_COL must be identity so that
+     * workstation color fields (which are MAP_COL-remapped VDI pens) index
+     * ie_vdi_palette[] correctly.  Override whatever was set above. */
+    for (i = 0; i < MAXCOLOURS; i++)
+    {
+        MAP_COL[i] = i;
+        REV_MAP_COL[i] = i;
+    }
+#endif
 
     /* now initialise the hardware */
     for (i = 0; i < numcolors; i++)

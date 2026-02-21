@@ -62,6 +62,9 @@
 #include "amiga.h"
 #include "lisa.h"
 #include "coldfire.h"
+#ifdef MACHINE_IE
+#include "ie_machine.h"
+#endif
 #if WITH_CLI
 #include "../cli/clistub.h"
 #endif
@@ -239,6 +242,13 @@ static void bios_init(void)
 
     KDEBUG(("vecs_init()\n"));
     vecs_init();        /* setup all exception vectors (above) */
+
+#ifdef MACHINE_IE
+    /* Install IE level-5 timer ISR and enable interrupts early so that
+     * hz_200 starts ticking before any code that needs timeouts. */
+    ie_timer_install();
+#endif
+
     KDEBUG(("init_delay()\n"));
     init_delay();       /* set 'reasonable' default values for delay */
 
@@ -247,6 +257,15 @@ static void bios_init(void)
     machine_detect();   /* detect hardware */
     KDEBUG(("machine_init()\n"));
     machine_init();     /* initialise machine-specific stuff */
+
+#ifdef MACHINE_IE
+    /*
+     * Bring IE video online as early as possible.
+     * This mirrors known-good M68K demo bring-up (move.l #1,VIDEO_CTRL /
+     * move.l #0,VIDEO_MODE), but keeps it inside the EmuTOS machine port.
+     */
+    ie_screen_init();
+#endif
 
     /* Initialize the BIOS memory management */
     KDEBUG(("bmem_init()\n"));
@@ -353,7 +372,11 @@ static void bios_init(void)
 #endif
 
     /* misc. variables */
+#ifdef MACHINE_IE
+    dumpflg = 0;        /* unused on IE; 0 acts as null sentinel after vbl_list[] */
+#else
     dumpflg = -1;
+#endif
     sysbase = &os_header;
     savptr = (LONG) trap_save_area;
     etv_timer = (ETV_TIMER_T) just_rts;
@@ -396,6 +419,8 @@ static void bios_init(void)
 #else
     set_sr(0x2000);
 #endif
+
+    /* IE: boot delay removed — splash screen is skipped via INITINFO_DURATION 0 */
 
 #if defined(MACHINE_ARANYM) || defined(TARGET_1024)
     /* ARAnyM 1.1.0 loads only the first half of 1024k ROMs.

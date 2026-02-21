@@ -24,6 +24,9 @@
 #include "string.h"
 #include "conout.h"
 #include "../vdi/vdi_defs.h"    /* for phys_work stuff */
+#ifdef MACHINE_IE
+#include "ie_machine.h"
+#endif
 
 #define PLANE_OFFSET    2       /* interleaved planes */
 
@@ -125,6 +128,43 @@ static UBYTE *cell_addr(UWORD x, UWORD y)
      */
     return v_bas_ad + disy + disx + v_cur_of;
 }
+
+#ifdef MACHINE_IE
+static ULONG ie_console_rgba(UWORD idx)
+{
+    return (idx & 1) ? 0xffffffffUL : 0x000000ffUL;
+}
+
+static void ie_draw_cell(UBYTE *src, UWORD cx, UWORD cy)
+{
+    UWORD row, col;
+    UWORD fg = v_col_fg;
+    UWORD bg = v_col_bg;
+    ULONG px = (ULONG)cx * 8UL;
+    ULONG py = (ULONG)cy * (ULONG)v_cel_ht;
+    ULONG fg_rgba;
+    ULONG bg_rgba;
+
+    if (v_stat_0 & M_REVID) {
+        fg = v_col_bg;
+        bg = v_col_fg;
+    }
+    if (fg == bg) {
+        fg = (UWORD)(bg ^ 1);
+    }
+    fg_rgba = ie_console_rgba(fg);
+    bg_rgba = ie_console_rgba(bg);
+
+    for (row = 0; row < v_cel_ht; row++) {
+        UBYTE bits = src[row * v_fnt_wr];
+        ULONG row_off = (py + (ULONG)row) * IE_VRAM_STRIDE + (px << 2);
+        volatile ULONG *dst = (volatile ULONG *)(IE_VRAM_BASE + row_off);
+        for (col = 0; col < 8; col++) {
+            dst[col] = (bits & (1U << (7 - col))) ? fg_rgba : bg_rgba;
+        }
+    }
+}
+#endif
 
 
 
@@ -296,6 +336,15 @@ static void cell_xfer(UBYTE *src, UBYTE *dst)
 
 static void neg_cell(UBYTE *cell)
 {
+#ifdef MACHINE_IE
+    /*
+     * IE renders console glyphs in chunky RGBA via ie_draw_cell().
+     * Planar bitwise inversion corrupts RGBA pixels, so keep cursor
+     * inversion as a no-op for now.
+     */
+    MAYBE_UNUSED(cell);
+    return;
+#else
     int plane, len;
     int cell_len = v_cel_ht;
     int lin_wr = v_lin_wr;
@@ -328,6 +377,7 @@ static void neg_cell(UBYTE *cell)
     }
 
     v_stat_0 &= ~M_CRIT;                /* end of critical section. */
+#endif
 }
 
 
@@ -488,6 +538,23 @@ void ascii_out(int ch)
     if (src == NULL)
         return;                         /* no valid character */
 
+#ifdef MACHINE_IE
+    ie_draw_cell(src, v_cur_cx, v_cur_cy);
+
+    if (v_cur_cx < v_cel_mx) {
+        v_cur_cx += 1;
+    } else {
+        v_cur_cx = 0;
+        if (v_cur_cy < v_cel_my) {
+            v_cur_cy += 1;
+        } else {
+            scroll_up(0);
+        }
+    }
+    v_cur_ad = cell_addr(v_cur_cx, v_cur_cy);
+    return;
+#endif
+
     dst = v_cur_ad;                     /* a1 -> get destination */
 
     visible = v_stat_0 & M_CVIS;        /* test visibility bit */
@@ -597,6 +664,19 @@ static void blank_out16(int topx, int topy, int botx, int boty)
 
 void blank_out(int topx, int topy, int botx, int boty)
 {
+#ifdef MACHINE_IE
+    UWORD x, y, w, h;
+
+    if ((topx > botx) || (topy > boty))
+        return;
+
+    x = (UWORD)(topx * 8);
+    y = (UWORD)(topy * v_cel_ht);
+    w = (UWORD)((botx - topx + 1) * 8);
+    h = (UWORD)((boty - topy + 1) * v_cel_ht);
+    ie_fill_rect(x, y, w, h, ie_console_rgba(v_col_bg));
+    return;
+#else
     UWORD color;
     int pair, pairs, row, rows, offs;
     UBYTE *addr;
@@ -681,6 +761,7 @@ void blank_out(int topx, int topy, int botx, int boty)
             addr += offs;       /* skip non-region area with stride advance */
         }
     }
+#endif
 }
 
 
@@ -705,6 +786,18 @@ void blank_out(int topx, int topy, int botx, int boty)
 
 void scroll_up(UWORD top_line)
 {
+#ifdef MACHINE_IE
+    {
+        volatile ULONG *dst_p = (volatile ULONG *)(v_bas_ad + (ULONG)top_line * v_cel_wr);
+        volatile ULONG *src_p = (volatile ULONG *)((UBYTE *)dst_p + v_cel_wr);
+        ULONG longs = (ULONG)v_cel_wr * (v_cel_my - top_line) / sizeof(ULONG);
+        while (longs--)
+            *dst_p++ = *src_p++;
+        blank_out(0, v_cel_my, v_cel_mx, v_cel_my);
+    }
+    return;
+#endif
+
     ULONG count;
     UBYTE * src, * dst;
 
@@ -732,6 +825,19 @@ void scroll_up(UWORD top_line)
 
 void scroll_down(UWORD start_line)
 {
+#ifdef MACHINE_IE
+    {
+        ULONG nbytes = (ULONG)v_cel_wr * (v_cel_my - start_line);
+        volatile ULONG *src_end = (volatile ULONG *)(v_bas_ad + (ULONG)start_line * v_cel_wr + nbytes);
+        volatile ULONG *dst_end = (volatile ULONG *)((UBYTE *)src_end + v_cel_wr);
+        ULONG longs = nbytes / sizeof(ULONG);
+        while (longs--)
+            *--dst_end = *--src_end;
+        blank_out(0, start_line, v_cel_mx, start_line);
+    }
+    return;
+#endif
+
     ULONG count;
     UBYTE * src, * dst;
 
