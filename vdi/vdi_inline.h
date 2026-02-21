@@ -21,7 +21,8 @@ static __inline__ UWORD *get_start_addr16(const WORD x, const WORD y)
 #include "../bios/ie_machine.h"
 static __inline__ ULONG *get_start_addr_ie(const WORD x, const WORD y)
 {
-    return (ULONG *)(v_bas_ad + (x * sizeof(ULONG)) + muls(y, v_lin_wr));
+    LONG addr = (LONG)v_bas_ad + muls(y, v_lin_wr) + ((LONG)x << 2);
+    return (ULONG *)addr;
 }
 #endif
 
