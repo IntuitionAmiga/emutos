@@ -565,6 +565,12 @@ void kb_timerc_int(void)
             UBYTE ikbd_btns = (UBYTE)(((ie_btns & 1) << 1) | ((ie_btns >> 1) & 1));
             BOOL btn_changed = (ikbd_btns != last_ikbd_btns);
 
+            /* DIAG: log button changes via direct MMIO write to serial */
+            if (btn_changed) {
+                IE_MMIO16(IE_TERM_OUT) = ie_btns ? 'P' : 'R';
+                IE_MMIO16(IE_TERM_OUT) = '\n';
+            }
+
             if (dx != 0 || dy != 0 || btn_changed) {
                 /* Send multiple packets to cover full delta (max +-127 per packet) */
                 do {

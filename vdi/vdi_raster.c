@@ -1416,15 +1416,31 @@ static void vro_cpyfm_ie(struct blit_frame *info)
 
     mode = INTIN[0];
 
+    /* Use integer arithmetic to avoid -mshort generating indexed
+     * addressing with .w index register (sign-extends, wraps address) */
     src_width = info->s_nxln / (WORD)sizeof(ULONG);
     dst_width = info->d_nxln / (WORD)sizeof(ULONG);
     next_pixel = 1;
-    src = (ULONG *)info->s_form + ((LONG)info->s_ymin * src_width) + info->s_xmin;
-    dst = (ULONG *)info->d_form + ((LONG)info->d_ymin * dst_width) + info->d_xmin;
+    {
+        ULONG saddr = (ULONG)info->s_form
+                     + (ULONG)((LONG)info->s_ymin * (LONG)info->s_nxln)
+                     + (ULONG)((LONG)info->s_xmin * 4L);
+        ULONG daddr = (ULONG)info->d_form
+                     + (ULONG)((LONG)info->d_ymin * (LONG)info->d_nxln)
+                     + (ULONG)((LONG)info->d_xmin * 4L);
+        src = (ULONG *)saddr;
+        dst = (ULONG *)daddr;
+    }
 
     if (src < dst) {
-        src = (ULONG *)info->s_form + ((LONG)info->s_ymax * src_width) + info->s_xmax;
-        dst = (ULONG *)info->d_form + ((LONG)info->d_ymax * dst_width) + info->d_xmax;
+        ULONG saddr = (ULONG)info->s_form
+                     + (ULONG)((LONG)info->s_ymax * (LONG)info->s_nxln)
+                     + (ULONG)((LONG)info->s_xmax * 4L);
+        ULONG daddr = (ULONG)info->d_form
+                     + (ULONG)((LONG)info->d_ymax * (LONG)info->d_nxln)
+                     + (ULONG)((LONG)info->d_xmax * 4L);
+        src = (ULONG *)saddr;
+        dst = (ULONG *)daddr;
         src_width = -src_width;
         dst_width = -dst_width;
         next_pixel = -1;
@@ -1586,8 +1602,16 @@ static void vrt_cpyfm_ie(struct blit_frame *info)
     bit_mask = src_mask = 0x8000U >> (info->s_xmin & 0x000f);
     p = src = info->s_form + ((LONG)info->s_ymin * src_width) + src_off;
 
+    /* Compute destination address using integer arithmetic to avoid
+     * -mshort generating indexed addressing with .w index register,
+     * which sign-extends 16-bit offsets and wraps the address */
     dst_width = info->d_nxln / (WORD)sizeof(ULONG);
-    q = dst = (ULONG *)info->d_form + ((LONG)info->d_ymin * dst_width) + info->d_xmin;
+    {
+        ULONG daddr = (ULONG)info->d_form
+                    + (ULONG)((LONG)info->d_ymin * (LONG)info->d_nxln)
+                    + (ULONG)((LONG)info->d_xmin * 4L);
+        q = dst = (ULONG *)daddr;
+    }
 
     switch(mode) {
     case MD_ERASE:

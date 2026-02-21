@@ -1053,6 +1053,180 @@ void direct_screen_blit(WORD count, WORD *str)
 #endif
 
 
+#ifdef MACHINE_IE
+/*
+ * output a glyph to the 32-bit IE screen
+ *
+ * this handles the general case (arbitrary fonts, effects, clipping)
+ * unlike direct_screen_blit_ie() which only handles monospaced 8-pixel
+ */
+static void screen_blit_ie(LOCALVARS *vars)
+{
+    UWORD *p;
+    ULONG *q;
+    UBYTE *src, *dst;
+    ULONG fgcol, bgcol;
+    WORD h, w, skew, skew_start;
+    UWORD src_mask, mask, skew_mask;
+
+    /*
+     * set skew-related values
+     */
+    skew = LOFF + ROFF;
+    skew_mask = (UWORD)vars->skew_msk;
+    skew_start = vars->height;
+
+    if (skew && (vars->STYLE&F_OUTLINE))
+    {
+        if (SOURCEX)
+        {
+            SOURCEX = 0;
+            vars->tsdad = 0;
+        }
+        if (DESTX < 0)
+            vars->DESTX = DESTX;
+        if (vars->height > 8)
+            skew_start -= OUTLINE_THICKNESS;
+    }
+
+    /*
+     * set up source (mono font bitmap)
+     */
+    src = vars->sform;
+    src_mask = 0x8000 >> vars->tsdad;
+
+    /*
+     * set up destination for 32-bit chunky
+     * Use integer arithmetic to avoid -mshort indexed addressing bug
+     * when byte offset > 0x7FFF (e.g. y=460, v_lin_wr=2560 → offset=0x11F800)
+     */
+    {
+        ULONG addr = (ULONG)v_bas_ad;
+        addr += (LONG)vars->DESTX * (LONG)sizeof(ULONG);
+        addr += (ULONG)(UWORD)(vars->DESTY+vars->DELY-1) * (ULONG)v_lin_wr;
+        vars->dform = (UBYTE *)addr;
+    }
+    vars->d_next = -v_lin_wr;
+    dst = vars->dform;
+
+    /*
+     * set up colours from IE palette
+     */
+    fgcol = ie_vdi_palette[vars->forecol];
+    bgcol = ie_vdi_palette[0];
+
+    switch(vars->WRT_MODE) {
+    default:    /* WM_REPLACE */
+        for (h = vars->height; h > 0; h--, src += vars->s_next, dst += vars->d_next)
+        {
+            p = (UWORD *)src;
+            q = (ULONG *)dst;
+            for (w = vars->width, mask = src_mask; w > 0; w--)
+            {
+                *q++ = (*p & mask) ? fgcol : bgcol;
+                rorw1(mask);
+                if (mask == 0x8000)
+                    p++;
+            }
+            if (skew && (h <= skew_start))
+            {
+                rolw1(skew_mask);
+                if (skew_mask & 0x8000)
+                {
+                    rorw1(src_mask);
+                    if (src_mask == 0x8000)
+                        src++;
+                    dst += sizeof(ULONG);
+                }
+            }
+        }
+        break;
+    case WM_TRANS:
+        for (h = vars->height; h > 0; h--, src += vars->s_next, dst += vars->d_next)
+        {
+            p = (UWORD *)src;
+            q = (ULONG *)dst;
+            for (w = vars->width, mask = src_mask; w > 0; w--)
+            {
+                if (*p & mask)
+                    *q = fgcol;
+                q++;
+                rorw1(mask);
+                if (mask == 0x8000)
+                    p++;
+            }
+            if (skew && (h <= skew_start))
+            {
+                rolw1(skew_mask);
+                if (skew_mask & 0x8000)
+                {
+                    rorw1(src_mask);
+                    if (src_mask == 0x8000)
+                        src++;
+                    dst += sizeof(ULONG);
+                }
+            }
+        }
+        break;
+    case WM_XOR:
+        for (h = vars->height; h > 0; h--, src += vars->s_next, dst += vars->d_next)
+        {
+            p = (UWORD *)src;
+            q = (ULONG *)dst;
+            for (w = vars->width, mask = src_mask; w > 0; w--)
+            {
+                if (*p & mask)
+                    *q = ~*q;
+                q++;
+                rorw1(mask);
+                if (mask == 0x8000)
+                    p++;
+            }
+            if (skew && (h <= skew_start))
+            {
+                rolw1(skew_mask);
+                if (skew_mask & 0x8000)
+                {
+                    rorw1(src_mask);
+                    if (src_mask == 0x8000)
+                        src++;
+                    dst += sizeof(ULONG);
+                }
+            }
+        }
+        break;
+    case WM_ERASE:
+        for (h = vars->height; h > 0; h--, src += vars->s_next, dst += vars->d_next)
+        {
+            p = (UWORD *)src;
+            q = (ULONG *)dst;
+            for (w = vars->width, mask = src_mask; w > 0; w--)
+            {
+                if (!(*p & mask))
+                    *q = fgcol;
+                q++;
+                rorw1(mask);
+                if (mask == 0x8000)
+                    p++;
+            }
+            if (skew && (h <= skew_start))
+            {
+                rolw1(skew_mask);
+                if (skew_mask & 0x8000)
+                {
+                    rorw1(src_mask);
+                    if (src_mask == 0x8000)
+                        src++;
+                    dst += sizeof(ULONG);
+                }
+            }
+        }
+        break;
+    }
+}
+#endif
+
+
 #if CONF_WITH_VDI_16BIT
 /*
  * output a glyph to the 16-bit screen
@@ -1320,6 +1494,14 @@ static void screen_blit(LOCALVARS *vars)
     vars->dform += (vars->DESTX&0xfff0)>>v_planes_shift;    /* add x coordinate part of addr */
     vars->dform += (UWORD)(vars->DESTY+vars->DELY-1) * (ULONG)v_lin_wr; /* add y coordinate part of addr */
     vars->d_next = -v_lin_wr;
+
+#ifdef MACHINE_IE
+    if (vars->nbrplane == 32)
+    {
+        screen_blit_ie(vars);
+        return;
+    }
+#endif
 
     normal_blit(vars+1, vars->sform, vars->dform);  /* call assembler helper function */
 }

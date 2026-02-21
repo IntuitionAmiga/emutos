@@ -26,11 +26,12 @@ extern EVB      *eul, *dlr, *zlr;
  * Of course this is extremely bad practice. */
 static __inline__ EVB *FAKE_EVB(EVB **root)
 {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Warray-bounds"
-    UBYTE *fake_evb_start = ((UBYTE *)root) - offsetof(EVB, e_link);
-#pragma GCC diagnostic pop
-    return (EVB *)fake_evb_start;
+    /* Use integer arithmetic to prevent GCC -mshort from generating
+     * wrong displacements when q->e_link is accessed through the result.
+     * GCC 13 with -mshort folds the pointer subtraction into subsequent
+     * field accesses and computes displacement 0x10000 instead of 0. */
+    ULONG addr = (ULONG)root - offsetof(EVB, e_link);
+    return (EVB *)addr;
 }
 
 /* In Dispatch - a byte whose value is zero when not in function
