@@ -217,13 +217,13 @@ TOOLCHAIN_GCC_VERSION = -13
 #   size values.
 # -fno-ivopts -fno-tree-slsr: work around m68k-linux-gnu GCC ICE in
 #   immed_wide_int_const_1 triggered by ivopts and slsr passes with -mshort.
-TOOLCHAIN_CFLAGS = -fleading-underscore -Wa,--register-prefix-optional -fno-reorder-functions --param=min-pagesize=0 -DELF_TOOLCHAIN -DMACHINE_IE -fno-builtin -fno-ivopts -fno-tree-slsr
+TOOLCHAIN_CFLAGS = -fleading-underscore -Wa,--register-prefix-optional -fno-reorder-functions -DELF_TOOLCHAIN -DMACHINE_IE -fno-builtin -fno-ivopts -fno-tree-slsr
 # Appended AFTER WARNFLAGS to override -Werror=format (ptrdiff_t/size_t width diffs)
 TOOLCHAIN_WARNFIX = -Wno-error=format
 else ifeq (1,$(ELF))
 # Standard ELF toolchain
 TOOLCHAIN_PREFIX = m68k-elf-
-TOOLCHAIN_CFLAGS = -fleading-underscore -Wa,--register-prefix-optional -fno-reorder-functions --param=min-pagesize=0 -DELF_TOOLCHAIN
+TOOLCHAIN_CFLAGS = -fleading-underscore -Wa,--register-prefix-optional -fno-reorder-functions -DELF_TOOLCHAIN
 else
 # MiNT toolchain
 TOOLCHAIN_PREFIX = m68k-atari-mint-
