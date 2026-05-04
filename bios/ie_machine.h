@@ -39,6 +39,7 @@ void ie_clear(unsigned char r, unsigned char g, unsigned char b);
 unsigned short ie_kbd_has_code(void);
 unsigned short ie_kbd_code(void);
 unsigned short ie_kbd_mods(void);
+void ie_kbd_enqueue(unsigned short scancode);
 
 unsigned short ie_mouse_x(void);
 unsigned short ie_mouse_y(void);

@@ -537,11 +537,12 @@ static void do_key_repeat(void)
 void kb_timerc_int(void)
 {
 #ifdef MACHINE_IE
-    /* Poll IE keyboard MMIO — feed scancodes through kbd_int() pipeline */
-    while (ie_kbd_has_code()) {
-        UBYTE scancode = (UBYTE)ie_kbd_code();
-        kbd_int(scancode);
-    }
+    /*
+     * If the IE runtime drains SCAN_CODE outside the guest, it must inject
+     * those raw scancodes through ie_kbd_enqueue(). Do not read IE_SCAN_CODE
+     * here: that MMIO read dequeues from the host event queue and races the
+     * runtime scancode pump.
+     */
 
     /* Absolute mouse positioning — compute exact deltas from VDI cursor */
     {

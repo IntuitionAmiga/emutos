@@ -29,5 +29,6 @@
 /temp.rsc
 /temp.def
 /local.mk
+/.idea/
 /dsm.txt
 /tests/*/*.tos
