@@ -24,6 +24,7 @@
 
 #ifdef MACHINE_IE
 #include "../bios/ie_machine.h"
+#include "../bios/ie_blitter.h"
 #endif
 
 
@@ -562,15 +563,32 @@ static void OPTIMIZE_SMALL swblit_rect_common16(const VwkAttrib *attr, const Rec
 static void OPTIMIZE_SMALL swblit_rect_common_ie(const VwkAttrib *attr, const Rect *rect)
 {
     const UWORD patmsk = attr->patmsk;
-    const int yinc = v_lin_wr / (int)sizeof(ULONG);
-    ULONG *addr, *work;
-    ULONG bgcol, fgcol;
+    const int yinc = v_lin_wr / (int)sizeof(IE_PIXEL);
+    IE_PIXEL *addr, *work;
+    IE_PIXEL bgcol, fgcol;
     UWORD mask, pattern;
     int x, y, patind;
 
     addr = get_start_addr_ie(rect->x1, rect->y1);
-    fgcol = ie_vdi_palette[attr->color];
-    bgcol = ie_vdi_palette[0];
+    fgcol = ie_pixel(attr->color);
+    bgcol = ie_pixel(0);
+
+    /*
+     * Hardware fast path: a solid pattern (every scanline 0xffff) in REPLACE
+     * or TRANS mode lays the foreground colour across the whole rectangle, so
+     * offload it to the IE blitter as a single fill. patmsk == 0 forces patind
+     * to 0 on every row, so patptr[0] == 0xffff means all rows are solid.
+     * Other write modes / dithered patterns fall through to the CPU loop.
+     */
+    if ((attr->wrt_mode == WM_REPLACE || attr->wrt_mode == WM_TRANS)
+        && patmsk == 0 && attr->patptr[0] == 0xffff) {
+        ie_blt_fill_ex((ULONG)addr,
+                       (UWORD)(rect->x2 - rect->x1 + 1),
+                       (UWORD)(rect->y2 - rect->y1 + 1),
+                       v_lin_wr, ie_blt_pxcolor(fgcol),
+                       IE_BLT_PXFLAGS(IE_BLT_DM_COPY));
+        return;
+    }
 
     switch(attr->wrt_mode) {
     case WM_ERASE:
@@ -894,7 +912,7 @@ static void OPTIMIZE_SMALL swblit_rect_common(const VwkAttrib *attr, const Rect 
 void draw_rect_common(const VwkAttrib *attr, const Rect *rect)
 {
 #ifdef MACHINE_IE
-    if (TRUECOLOR_MODE) { swblit_rect_common_ie(attr, rect); return; }
+    if (IE_SCREEN_MODE) { swblit_rect_common_ie(attr, rect); return; }
 #endif
 #if CONF_WITH_VDI_16BIT
     if (TRUECOLOR_MODE)
@@ -1881,8 +1899,8 @@ static void draw_line16(const Line *line, WORD wrt_mode, UWORD color)
  */
 static void draw_line_ie(const Line *line, WORD wrt_mode, UWORD color)
 {
-    ULONG *addr;
-    ULONG bgcol, fgcol;
+    IE_PIXEL *addr;
+    IE_PIXEL bgcol, fgcol;
     UWORD linemask;
     WORD dx, dy, yinc;
     WORD eps, e1, e2;
@@ -1890,7 +1908,7 @@ static void draw_line_ie(const Line *line, WORD wrt_mode, UWORD color)
 
     dx = line->x2 - line->x1;
     dy = line->y2 - line->y1;
-    yinc = v_lin_wr / (WORD)sizeof(ULONG);
+    yinc = v_lin_wr / (WORD)sizeof(IE_PIXEL);
 
     if (dy < 0) {
         dy = -dy;
@@ -1898,10 +1916,27 @@ static void draw_line_ie(const Line *line, WORD wrt_mode, UWORD color)
     }
 
     addr = get_start_addr_ie(line->x1, line->y1);
-    fgcol = ie_vdi_palette[color];
-    bgcol = ie_vdi_palette[0];
+    fgcol = ie_pixel(color);
+    bgcol = ie_pixel(0);
 
     linemask = LN_MASK;
+
+    /*
+     * Hardware fast path: a solid (unstyled) line that just lays down the
+     * foreground colour. The IE blitter's line op has no style mask, so only
+     * a full LN_MASK in REPLACE/TRANS qualifies (both write fgcol on every
+     * pixel of a solid line). Extended-line mode: base = framebuffer, packed
+     * endpoints, FG byte-swapped for RGBA32. Coordinates are already clipped
+     * by the VDI before abline().
+     */
+    if (linemask == 0xFFFF &&
+        (wrt_mode == WM_REPLACE || wrt_mode == WM_TRANS)) {
+        ie_blt_line(IE_VRAM_BASE, (UWORD)v_lin_wr,
+                    line->x1, line->y1, line->x2, line->y2,
+                    ie_blt_pxcolor(fgcol),
+                    IE_BLT_PXFLAGS(IE_BLT_DM_COPY));
+        return;
+    }
 
     if (dx >= dy) {
         e1 = 2*dy;
@@ -2386,13 +2421,13 @@ static void swblit_vertical_line16(const Line *line, WORD wrt_mode, UWORD color)
  */
 static void swblit_vertical_line_ie(const Line *line, WORD wrt_mode, UWORD color)
 {
-    ULONG *addr;
+    IE_PIXEL *addr;
     WORD dy, yinc, loopcnt;
-    ULONG bgcol, fgcol;
+    IE_PIXEL bgcol, fgcol;
     UWORD linemask;
 
     dy = line->y2 - line->y1;
-    yinc = v_lin_wr / (WORD)sizeof(ULONG);
+    yinc = v_lin_wr / (WORD)sizeof(IE_PIXEL);
 
     if (dy < 0) {
         dy = -dy;
@@ -2400,8 +2435,8 @@ static void swblit_vertical_line_ie(const Line *line, WORD wrt_mode, UWORD color
     }
 
     addr = get_start_addr_ie(line->x1, line->y1);
-    fgcol = ie_vdi_palette[color];
-    bgcol = ie_vdi_palette[0];
+    fgcol = ie_pixel(color);
+    bgcol = ie_pixel(0);
 
     linemask = LN_MASK;
 
@@ -2574,7 +2609,7 @@ void abline(const Line *line, const WORD wrt_mode, UWORD color)
      */
     if (line->x1 == line->x2) {
 #ifdef MACHINE_IE
-        if (TRUECOLOR_MODE)
+        if (IE_SCREEN_MODE)
         {
             swblit_vertical_line_ie(line, wrt_mode, color);
             return;
@@ -2662,7 +2697,7 @@ void abline(const Line *line, const WORD wrt_mode, UWORD color)
     ordered.x2 = x2;
     ordered.y2 = y2;
 #ifdef MACHINE_IE
-    if (TRUECOLOR_MODE)
+    if (IE_SCREEN_MODE)
         draw_line_ie(&ordered, wrt_mode, color);
     else
 #endif

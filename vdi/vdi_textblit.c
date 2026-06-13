@@ -25,6 +25,7 @@
 
 #ifdef MACHINE_IE
 #include "../bios/ie_machine.h"
+#include "../bios/ie_blitter.h"
 #endif
 
 
@@ -845,20 +846,20 @@ static void direct_screen_blit16(WORD count, WORD *str)
  */
 static void direct_screen_blit_ie(WORD count, WORD *str)
 {
-    ULONG fgcol, bgcol;
+    IE_PIXEL fgcol, bgcol;
     WORD height, mode, n;
     WORD src_width, dst_width;
     UBYTE mask;
     UBYTE *src, *p;
-    ULONG *dst, *save_dst, *q;
+    IE_PIXEL *dst, *save_dst, *q;
 
     height = DELY;
     mode = WRT_MODE;
     src_width = FWIDTH;
-    dst_width = v_lin_wr / (WORD)sizeof(ULONG);
+    dst_width = v_lin_wr / (WORD)sizeof(IE_PIXEL);
 
-    fgcol = ie_vdi_palette[TEXTFG];
-    bgcol = ie_vdi_palette[0];
+    fgcol = ie_pixel(TEXTFG);
+    bgcol = ie_pixel(0);
 
     dst = get_start_addr_ie(DESTX, DESTY);
 
@@ -948,7 +949,7 @@ void direct_screen_blit(WORD count, WORD *str)
     dst_width = v_lin_wr;
 
 #ifdef MACHINE_IE
-    if (TRUECOLOR_MODE) { direct_screen_blit_ie(count, str); return; }
+    if (IE_SCREEN_MODE) { direct_screen_blit_ie(count, str); return; }
 #endif
 #if CONF_WITH_VDI_16BIT
     if (TRUECOLOR_MODE)
@@ -1063,9 +1064,9 @@ void direct_screen_blit(WORD count, WORD *str)
 static void screen_blit_ie(LOCALVARS *vars)
 {
     UWORD *p;
-    ULONG *q;
+    IE_PIXEL *q;
     UBYTE *src, *dst;
-    ULONG fgcol, bgcol;
+    IE_PIXEL fgcol, bgcol;
     WORD h, w, skew, skew_start;
     UWORD src_mask, mask, skew_mask;
 
@@ -1102,7 +1103,7 @@ static void screen_blit_ie(LOCALVARS *vars)
      */
     {
         ULONG addr = (ULONG)v_bas_ad;
-        addr += (LONG)vars->DESTX * (LONG)sizeof(ULONG);
+        addr += (LONG)vars->DESTX * (LONG)IE_BPP;
         addr += (ULONG)(UWORD)(vars->DESTY+vars->DELY-1) * (ULONG)v_lin_wr;
         vars->dform = (UBYTE *)addr;
     }
@@ -1112,15 +1113,43 @@ static void screen_blit_ie(LOCALVARS *vars)
     /*
      * set up colours from IE palette
      */
-    fgcol = ie_vdi_palette[vars->forecol];
-    bgcol = ie_vdi_palette[0];
+    fgcol = ie_pixel(vars->forecol);
+    bgcol = ie_pixel(0);
+
+    /*
+     * Hardware fast path: plain opaque/transparent text via the IE blitter's
+     * color-expand. Restricted to the common case — no skew and no style
+     * effects (bold/italic/outline/etc.) — which is where the bitmap maps
+     * 1:1 to a color-expand. sform/dform address the BOTTOM glyph row (the
+     * CPU loop runs bottom-up via negative strides), so step back height-1
+     * rows to the top and feed positive strides. The mono font row stride is
+     * -s_next; tsdad is the MSB-first start bit (matches the chip's sampling).
+     * FG/BG are byte-swapped for RGBA32; JAM1 = transparent (WM_TRANS).
+     */
+    if (skew == 0 && vars->STYLE == 0 &&
+        (vars->WRT_MODE == WM_REPLACE || vars->WRT_MODE == WM_TRANS)) {
+        WORD row_bytes = -vars->s_next;
+        ULONG top_src = (ULONG)vars->sform
+                      + (ULONG)((LONG)(vars->height - 1) * (LONG)vars->s_next);
+        ULONG top_dst = (ULONG)vars->dform
+                      - (ULONG)((LONG)(vars->height - 1) * (LONG)v_lin_wr);
+        ULONG flags = IE_BLT_PXFLAGS(IE_BLT_DM_COPY)
+                    | ((vars->WRT_MODE == WM_TRANS) ? IE_BLT_FLAGS_JAM1 : 0UL);
+
+        ie_blt_color_expand(top_src, top_dst,
+                            (UWORD)vars->width, (UWORD)vars->height,
+                            (UWORD)row_bytes, (UWORD)vars->tsdad,
+                            v_lin_wr,
+                            ie_blt_pxcolor(fgcol), ie_blt_pxcolor(bgcol), flags);
+        return;
+    }
 
     switch(vars->WRT_MODE) {
     default:    /* WM_REPLACE */
         for (h = vars->height; h > 0; h--, src += vars->s_next, dst += vars->d_next)
         {
             p = (UWORD *)src;
-            q = (ULONG *)dst;
+            q = (IE_PIXEL *)dst;
             for (w = vars->width, mask = src_mask; w > 0; w--)
             {
                 *q++ = (*p & mask) ? fgcol : bgcol;
@@ -1136,7 +1165,7 @@ static void screen_blit_ie(LOCALVARS *vars)
                     rorw1(src_mask);
                     if (src_mask == 0x8000)
                         src++;
-                    dst += sizeof(ULONG);
+                    dst += sizeof(IE_PIXEL);
                 }
             }
         }
@@ -1145,7 +1174,7 @@ static void screen_blit_ie(LOCALVARS *vars)
         for (h = vars->height; h > 0; h--, src += vars->s_next, dst += vars->d_next)
         {
             p = (UWORD *)src;
-            q = (ULONG *)dst;
+            q = (IE_PIXEL *)dst;
             for (w = vars->width, mask = src_mask; w > 0; w--)
             {
                 if (*p & mask)
@@ -1163,7 +1192,7 @@ static void screen_blit_ie(LOCALVARS *vars)
                     rorw1(src_mask);
                     if (src_mask == 0x8000)
                         src++;
-                    dst += sizeof(ULONG);
+                    dst += sizeof(IE_PIXEL);
                 }
             }
         }
@@ -1172,7 +1201,7 @@ static void screen_blit_ie(LOCALVARS *vars)
         for (h = vars->height; h > 0; h--, src += vars->s_next, dst += vars->d_next)
         {
             p = (UWORD *)src;
-            q = (ULONG *)dst;
+            q = (IE_PIXEL *)dst;
             for (w = vars->width, mask = src_mask; w > 0; w--)
             {
                 if (*p & mask)
@@ -1190,7 +1219,7 @@ static void screen_blit_ie(LOCALVARS *vars)
                     rorw1(src_mask);
                     if (src_mask == 0x8000)
                         src++;
-                    dst += sizeof(ULONG);
+                    dst += sizeof(IE_PIXEL);
                 }
             }
         }
@@ -1199,7 +1228,7 @@ static void screen_blit_ie(LOCALVARS *vars)
         for (h = vars->height; h > 0; h--, src += vars->s_next, dst += vars->d_next)
         {
             p = (UWORD *)src;
-            q = (ULONG *)dst;
+            q = (IE_PIXEL *)dst;
             for (w = vars->width, mask = src_mask; w > 0; w--)
             {
                 if (!(*p & mask))
@@ -1217,7 +1246,7 @@ static void screen_blit_ie(LOCALVARS *vars)
                     rorw1(src_mask);
                     if (src_mask == 0x8000)
                         src++;
-                    dst += sizeof(ULONG);
+                    dst += sizeof(IE_PIXEL);
                 }
             }
         }
@@ -1496,7 +1525,7 @@ static void screen_blit(LOCALVARS *vars)
     vars->d_next = -v_lin_wr;
 
 #ifdef MACHINE_IE
-    if (vars->nbrplane == 32)
+    if (vars->nbrplane == IE_VRAM_PLANES)
     {
         screen_blit_ie(vars);
         return;

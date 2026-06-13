@@ -334,7 +334,7 @@ bios_src +=  memory.S processor.S vectors.S aciavecs.S bios.c xbios.c acsi.c \
 bios_src += $(EXTRA_BIOS_SRC)
 
 # Intuition Engine platform support
-bios_src += ie_kbd.c ie_mouse.c ie_screen.c ie_sound.c ie_timer.c
+bios_src += ie_kbd.c ie_mouse.c ie_screen.c ie_sound.c ie_timer.c ie_blitter.c
 
 ifeq (1,$(COLDFIRE))
   bios_src += coldfire.c coldfire2.S spi_cf.c

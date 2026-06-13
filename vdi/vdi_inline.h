@@ -19,10 +19,25 @@ static __inline__ UWORD *get_start_addr16(const WORD x, const WORD y)
 
 #ifdef MACHINE_IE
 #include "../bios/ie_machine.h"
-static __inline__ ULONG *get_start_addr_ie(const WORD x, const WORD y)
+
+static __inline__ IE_PIXEL *get_start_addr_ie(const WORD x, const WORD y)
 {
-    LONG addr = (LONG)v_bas_ad + muls(y, v_lin_wr) + ((LONG)x << 2);
-    return (ULONG *)addr;
+    LONG addr = (LONG)v_bas_ad + muls(y, v_lin_wr) + ((LONG)x * IE_BPP);
+    return (IE_PIXEL *)addr;
+}
+
+/*
+ * ie_pixel - the screen value for a VDI colour index. In CLUT8 the framebuffer
+ * stores the index directly (the IE hardware palette maps it to RGBA); in
+ * RGBA32 it stores the packed colour from the software palette.
+ */
+static __inline__ IE_PIXEL ie_pixel(WORD color)
+{
+#if CONF_IE_CLUT8
+    return (IE_PIXEL)(UBYTE)color;
+#else
+    return (IE_PIXEL)ie_vdi_palette[color];
+#endif
 }
 #endif
 

@@ -780,8 +780,8 @@ static void cur_display16(Mcdb *sprite, MCS *mcs, WORD x, WORD y)
 static void cur_display_ie(Mcdb *sprite, MCS *mcs, WORD x, WORD y)
 {
     UWORD *mask_start;
-    ULONG *dst, *save;
-    ULONG bgcol, fgcol;
+    IE_PIXEL *dst, *save;
+    IE_PIXEL bgcol, fgcol;
     UWORD bgmask, fgmask;
     WORD dst_inc, i, rows, shift, width;
 
@@ -811,17 +811,17 @@ static void cur_display_ie(Mcdb *sprite, MCS *mcs, WORD x, WORD y)
     }
 
     dst = get_start_addr_ie(x, y);
-    dst_inc = v_lin_wr / (WORD)sizeof(ULONG) - width;
+    dst_inc = v_lin_wr / (WORD)sizeof(IE_PIXEL) - width;
 
-    save = (ULONG *)mcs->area;
+    save = (IE_PIXEL *)mcs->area;
 
     mcs->len = rows;
     mcs->addr = (UWORD *)dst;
     mcs->stat |= MCS_VALID;
     mcs->width = width;
 
-    bgcol = ie_vdi_palette[sprite->bg_col];
-    fgcol = ie_vdi_palette[sprite->fg_col];
+    bgcol = ie_pixel(sprite->bg_col);
+    fgcol = ie_pixel(sprite->fg_col);
     while (rows-- > 0) {
         bgmask = *mask_start++;
         bgmask <<= shift;
@@ -953,7 +953,7 @@ void cur_display (Mcdb *sprite, MCS *mcs, WORD x, WORD y)
     ULONG *save;
 
 #ifdef MACHINE_IE
-    if (TRUECOLOR_MODE) {
+    if (IE_SCREEN_MODE) {
         cur_display_ie(sprite, mcs, x, y);
         return;
     }
@@ -1132,21 +1132,21 @@ static void cur_replace16(MCS *mcs)
  */
 static void cur_replace_ie(MCS *mcs)
 {
-    ULONG *addr, *dst, *src;
+    IE_PIXEL *addr, *dst, *src;
     UWORD row, col;
 
     if (!(mcs->stat & MCS_VALID))
         return;
     mcs->stat &= ~MCS_VALID;
 
-    addr = (ULONG *)mcs->addr;
-    src = (ULONG *)mcs->area;
+    addr = (IE_PIXEL *)mcs->addr;
+    src = (IE_PIXEL *)mcs->area;
 
     for (row = mcs->len, dst = addr; row > 0; row--, dst = addr) {
         for (col = mcs->width; col > 0; col--) {
             *dst++ = *src++;
         }
-        addr += v_lin_wr / sizeof(ULONG);
+        addr += v_lin_wr / sizeof(IE_PIXEL);
     }
 }
 #endif
@@ -1172,7 +1172,7 @@ void cur_replace (MCS *mcs)
     const WORD dst_inc = v_lin_wr >> 1; /* # words in a scan line */
 
 #ifdef MACHINE_IE
-    if (TRUECOLOR_MODE) {
+    if (IE_SCREEN_MODE) {
         cur_replace_ie(mcs);
         return;
     }

@@ -132,7 +132,11 @@ static UBYTE *cell_addr(UWORD x, UWORD y)
 #ifdef MACHINE_IE
 static ULONG ie_console_rgba(UWORD idx)
 {
+#if CONF_IE_CLUT8
+    return (ULONG)idx;          /* CLUT8: store the palette index directly */
+#else
     return (idx & 1) ? 0xffffffffUL : 0x000000ffUL;
+#endif
 }
 
 static void ie_draw_cell(UBYTE *src, UWORD cx, UWORD cy)
@@ -157,8 +161,8 @@ static void ie_draw_cell(UBYTE *src, UWORD cx, UWORD cy)
 
     for (row = 0; row < v_cel_ht; row++) {
         UBYTE bits = src[row * v_fnt_wr];
-        ULONG row_off = (py + (ULONG)row) * IE_VRAM_STRIDE + (px << 2);
-        volatile ULONG *dst = (volatile ULONG *)(IE_VRAM_BASE + row_off);
+        ULONG row_off = (py + (ULONG)row) * IE_VRAM_STRIDE + (px * IE_BPP);
+        volatile IE_PIXEL *dst = (volatile IE_PIXEL *)(IE_VRAM_BASE + row_off);
         for (col = 0; col < 8; col++) {
             dst[col] = (bits & (1U << (7 - col))) ? fg_rgba : bg_rgba;
         }

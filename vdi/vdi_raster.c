@@ -25,6 +25,7 @@
 
 #ifdef MACHINE_IE
 #include "../bios/ie_machine.h"
+#include "../bios/ie_blitter.h"
 #include "vdi_inline.h"
 #endif
 
@@ -1034,7 +1035,7 @@ setup_info (struct raster_t *raster, struct blit_frame * info)
     info->d_nxpl = 2;           /* next plane offset (destination) */
 
 #ifdef MACHINE_IE
-    if (info->plane_ct == 32)
+    if (info->plane_ct == IE_VRAM_PLANES)
         return FALSE;   /* 32-bit chunky: handled by IE raster functions */
 #endif
 #if CONF_WITH_VDI_16BIT
@@ -1410,37 +1411,76 @@ static void vrt_cpyfm16(struct blit_frame *info)
  */
 static void vro_cpyfm_ie(struct blit_frame *info)
 {
-    ULONG *src, *dst, *p, *q;
+    IE_PIXEL *src, *dst, *p, *q;
     WORD src_width, dst_width, next_pixel;
     WORD mode, rows, cols;
 
     mode = INTIN[0];
 
+    /*
+     * Hardware fast path for the blitter-safe raster ops: Copy (S_ONLY) and
+     * the two solid fills (ALL_WHITE=0, ALL_BLACK=all-ones). 0 / 0xFFFFFFFF are
+     * byte-swap invariant and the chip masks them to the active BPP, so they
+     * work in both CLUT8 and RGBA32 without ie_blt_color(). The other 13 modes
+     * stay on the CPU loop below (correct index ops in CLUT8, alpha-unsafe in
+     * RGBA32). S_ONLY is only offloaded between distinct forms: an in-place
+     * overlapping copy needs the CPU's direction handling.
+     */
+    {
+        ULONG s_base = (ULONG)info->s_form
+                     + (ULONG)((LONG)info->s_ymin * (LONG)info->s_nxln)
+                     + (ULONG)((LONG)info->s_xmin * IE_BPP);
+        ULONG d_base = (ULONG)info->d_form
+                     + (ULONG)((LONG)info->d_ymin * (LONG)info->d_nxln)
+                     + (ULONG)((LONG)info->d_xmin * IE_BPP);
+        UWORD w = info->s_xmax - info->s_xmin + 1;
+        UWORD h = info->s_ymax - info->s_ymin + 1;
+
+        switch(mode) {
+        case BM_ALL_WHITE:
+            ie_blt_fill_ex(d_base, w, h, (UWORD)info->d_nxln, 0UL,
+                           IE_BLT_PXFLAGS(IE_BLT_DM_COPY));
+            return;
+        case BM_ALL_BLACK:
+            ie_blt_fill_ex(d_base, w, h, (UWORD)info->d_nxln, 0xFFFFFFFFUL,
+                           IE_BLT_PXFLAGS(IE_BLT_DM_COPY));
+            return;
+        case BM_S_ONLY:
+            if (info->s_form != info->d_form) {
+                ie_blt_copy_ex(s_base, d_base, w, h,
+                               (UWORD)info->s_nxln, (UWORD)info->d_nxln,
+                               IE_BLT_PXFLAGS(IE_BLT_DM_COPY));
+                return;
+            }
+            break;  /* same-form copy may overlap: use CPU path */
+        }
+    }
+
     /* Use integer arithmetic to avoid -mshort generating indexed
      * addressing with .w index register (sign-extends, wraps address) */
-    src_width = info->s_nxln / (WORD)sizeof(ULONG);
-    dst_width = info->d_nxln / (WORD)sizeof(ULONG);
+    src_width = info->s_nxln / (WORD)sizeof(IE_PIXEL);
+    dst_width = info->d_nxln / (WORD)sizeof(IE_PIXEL);
     next_pixel = 1;
     {
         ULONG saddr = (ULONG)info->s_form
                      + (ULONG)((LONG)info->s_ymin * (LONG)info->s_nxln)
-                     + (ULONG)((LONG)info->s_xmin * 4L);
+                     + (ULONG)((LONG)info->s_xmin * IE_BPP);
         ULONG daddr = (ULONG)info->d_form
                      + (ULONG)((LONG)info->d_ymin * (LONG)info->d_nxln)
-                     + (ULONG)((LONG)info->d_xmin * 4L);
-        src = (ULONG *)saddr;
-        dst = (ULONG *)daddr;
+                     + (ULONG)((LONG)info->d_xmin * IE_BPP);
+        src = (IE_PIXEL *)saddr;
+        dst = (IE_PIXEL *)daddr;
     }
 
     if (src < dst) {
         ULONG saddr = (ULONG)info->s_form
                      + (ULONG)((LONG)info->s_ymax * (LONG)info->s_nxln)
-                     + (ULONG)((LONG)info->s_xmax * 4L);
+                     + (ULONG)((LONG)info->s_xmax * IE_BPP);
         ULONG daddr = (ULONG)info->d_form
                      + (ULONG)((LONG)info->d_ymax * (LONG)info->d_nxln)
-                     + (ULONG)((LONG)info->d_xmax * 4L);
-        src = (ULONG *)saddr;
-        dst = (ULONG *)daddr;
+                     + (ULONG)((LONG)info->d_xmax * IE_BPP);
+        src = (IE_PIXEL *)saddr;
+        dst = (IE_PIXEL *)daddr;
         src_width = -src_width;
         dst_width = -dst_width;
         next_pixel = -1;
@@ -1587,15 +1627,15 @@ static void vro_cpyfm_ie(struct blit_frame *info)
 static void vrt_cpyfm_ie(struct blit_frame *info)
 {
     UWORD *src, *p;
-    ULONG *dst, *q;
+    IE_PIXEL *dst, *q;
     WORD mode, src_width, src_off, dst_width, x, y;
     UWORD src_mask, bit_mask;
-    ULONG fgcol, bgcol;
+    IE_PIXEL fgcol, bgcol;
 
     mode = INTIN[0];
 
-    fgcol = ie_vdi_palette[info->fg_col];
-    bgcol = ie_vdi_palette[info->bg_col];
+    fgcol = ie_pixel(info->fg_col);
+    bgcol = ie_pixel(info->bg_col);
 
     src_width = info->s_nxln / (WORD)sizeof(WORD);
     src_off = info->s_xmin >> 4;
@@ -1605,12 +1645,12 @@ static void vrt_cpyfm_ie(struct blit_frame *info)
     /* Compute destination address using integer arithmetic to avoid
      * -mshort generating indexed addressing with .w index register,
      * which sign-extends 16-bit offsets and wraps the address */
-    dst_width = info->d_nxln / (WORD)sizeof(ULONG);
+    dst_width = info->d_nxln / (WORD)sizeof(IE_PIXEL);
     {
         ULONG daddr = (ULONG)info->d_form
                     + (ULONG)((LONG)info->d_ymin * (LONG)info->d_nxln)
-                    + (ULONG)((LONG)info->d_xmin * 4L);
-        q = dst = (ULONG *)daddr;
+                    + (ULONG)((LONG)info->d_xmin * IE_BPP);
+        q = dst = (IE_PIXEL *)daddr;
     }
 
     switch(mode) {
@@ -1709,7 +1749,7 @@ cpy_raster(struct raster_t *raster, struct blit_frame *info)
         info->fg_col = 0;       /* entry will be referenced */
 
 #ifdef MACHINE_IE
-        if (info->plane_ct == 32) { vro_cpyfm_ie(info); return; }
+        if (info->plane_ct == IE_VRAM_PLANES) { vro_cpyfm_ie(info); return; }
 #endif
 #if CONF_WITH_VDI_16BIT
         if (info->plane_ct > 8)
@@ -1777,7 +1817,7 @@ cpy_raster(struct raster_t *raster, struct blit_frame *info)
         }
 
 #ifdef MACHINE_IE
-        if (info->plane_ct == 32) { vrt_cpyfm_ie(info); return; }
+        if (info->plane_ct == IE_VRAM_PLANES) { vrt_cpyfm_ie(info); return; }
 #endif
 #if CONF_WITH_VDI_16BIT
         if (info->plane_ct > 8)

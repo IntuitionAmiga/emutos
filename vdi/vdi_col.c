@@ -667,15 +667,28 @@ static void set_color_ie(WORD colnum, WORD *rgb)
     UBYTE g = (UBYTE)(((long)rgb[1] * 255 + 500) / 1000);
     UBYTE b = (UBYTE)(((long)rgb[2] * 255 + 500) / 1000);
     ie_vdi_palette[colnum] = ie_rgba(r, g, b, 0xFF);
+#if CONF_IE_CLUT8
+    /*
+     * CLUT8: the framebuffer stores indices, so load the real colour into the
+     * IE hardware palette. The CLUT register format is 0x00RRGGBB (R in bits
+     * 16-23), which differs from ie_rgba()'s 0xRRGGBBAA packing.
+     */
+    IE_MMIO32(IE_VIDEO_PAL_ENTRY(colnum)) =
+        ((ULONG)r << 16) | ((ULONG)g << 8) | (ULONG)b;
+#endif
 }
 
 static void vs_color_ie(void)
 {
     WORD colnum = INTIN[0];
     WORD i, *intin, rgb[3], *rgbptr;
+    WORD *save;
     if (colnum < 0 || colnum >= numcolors) return;
+    /* Pens 0-15 live in REQ_COL; extended pens 16-255 live in req_col2.
+     * (numcolors is 256 in CLUT8, so colnum can exceed 15 here.) */
+    save = (colnum < 16) ? REQ_COL[colnum] : req_col2[colnum-16];
     for (i = 0, intin = INTIN+1, rgbptr = rgb; i < 3; i++, intin++, rgbptr++) {
-        REQ_COL[colnum][i] = *intin;
+        save[i] = *intin;
         if (*intin > 1000) *rgbptr = 1000;
         else if (*intin < 0) *rgbptr = 0;
         else *rgbptr = *intin;
@@ -694,7 +707,7 @@ void vdi_vs_color(Vwk *vwk)
     WORD *intin, rgb[3], *rgbptr;
 
 #ifdef MACHINE_IE
-    if (TRUECOLOR_MODE) { vs_color_ie(); return; }
+    if (IE_SCREEN_MODE) { vs_color_ie(); return; }
 #endif
 
 #if CONF_WITH_VDI_16BIT
@@ -790,6 +803,17 @@ void init_colors(void)
         ie_vdi_palette[i] = ie_rgba(0, 0, 0, 0xFF);
     for (i = 0; i < 16; i++)
         set_color_ie(i, (WORD *)st_palette[i]);
+#if CONF_IE_CLUT8
+    /* In CLUT8 mode set_color_ie() is the only path that programs the IE
+     * hardware palette, so initialise the extended pens 16..255 too (to black)
+     * — otherwise they keep their reset/boot-marker values (e.g. entry 255's
+     * boot yellow) until an explicit vs_color(). */
+    {
+        static const WORD black[3] = {0, 0, 0};
+        for (i = 16; i < 256; i++)
+            set_color_ie(i, (WORD *)black);
+    }
+#endif
     /* IE has no hardware palette registers — MAP_COL must be identity so that
      * workstation color fields (which are MAP_COL-remapped VDI pens) index
      * ie_vdi_palette[] correctly.  Override whatever was set above. */

@@ -846,7 +846,7 @@ void screen_get_current_mode_info(UWORD *planes, UWORD *hz_rez, UWORD *vt_rez)
 #ifdef MACHINE_AMIGA
     amiga_get_current_mode_info(planes, hz_rez, vt_rez);
 #elif defined(MACHINE_IE)
-    *planes = 32;
+    *planes = IE_VRAM_PLANES;
     *hz_rez = IE_VRAM_WIDTH;
     *vt_rez = IE_VRAM_HEIGHT;
 #elif defined(MACHINE_LISA)
